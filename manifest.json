@@ -1,0 +1,18 @@
+{
+  "name": "Strive Ultimate Pro+",
+  "short_name": "Strive",
+  "description": "Professionele hardloop training app",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121214",
+  "theme_color": "#121214",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/tailwindlabs/heroicons/master/optimized/24/solid/fire.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
