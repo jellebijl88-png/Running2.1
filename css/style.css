@@ -340,7 +340,7 @@ input[type="range"]::-moz-range-thumb {
 /* ===== Charts & Maps ===== */
 #map { width: 100%; min-height: 260px; background: var(--bg-secondary); flex-shrink: 0; }
 .chart-container { padding: 0; margin: 0; width: 100%; }
-#live-training-map { width: 100%; height: 160px; margin-bottom: 10px; border-radius: var(--radius-md); background: var(--bg-secondary); display: none; }
+#live-training-map { width: 100%; height: 160px; margin-bottom: 10px; border-radius: var(--radius-md); background: var(--bg-secondary); }
 
 /* ===== Overlays & Sheets ===== */
 #preview-overlay {
@@ -415,9 +415,20 @@ input[type="range"]::-moz-range-thumb {
     font-weight: 700; font-size: 14px;
 }
 
-/* ===== Bottom Navigation ===== */
+/* ===== Content Scroll Area ===== */
+.scroll-content {
+    flex: 1; overflow-y: auto; overflow-x: hidden;
+    position: relative;
+    -webkit-overflow-scrolling: touch;
+}
+.scroll-content::-webkit-scrollbar { width: 4px; }
+.scroll-content::-webkit-scrollbar-track { background: transparent; }
+.scroll-content::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 4px; }
+
+/* ===== Bottom Navigation - ALWAYS VISIBLE ===== */
 .bottom-nav {
-    position: absolute; bottom: 0; width: 100%;
+    flex-shrink: 0;
+    width: 100%;
     background: var(--bg-panel);
     border-top: var(--border);
     backdrop-filter: blur(20px);
@@ -425,6 +436,7 @@ input[type="range"]::-moz-range-thumb {
     padding: 8px 0 24px;
     border-top-left-radius: 22px; border-top-right-radius: 22px;
     z-index: 2000;
+    position: relative;
 }
 .nav-item {
     display: flex; flex-direction: column; align-items: center;
@@ -444,10 +456,15 @@ input[type="range"]::-moz-range-thumb {
     transform: scale(1.1); filter: none; opacity: 1;
 }
 
+/* Hide bottom nav when timer-display is active */
+#timer-display.active ~ .bottom-nav {
+    display: none !important;
+}
+
 /* ===== Tabs ===== */
 .tab-view {
     display: none; padding: 20px;
-    padding-bottom: 110px; height: 100%; overflow-y: auto;
+    padding-bottom: 20px;
 }
 .tab-view.active { display: block; animation: fadeUp 0.3s var(--easing); }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
@@ -469,6 +486,10 @@ input[type="range"]::-moz-range-thumb {
 #timer-display {
     position: absolute; inset: 0; background: var(--bg-dark);
     z-index: 3500; padding-top: 20px;
+    display: none; flex-direction: column;
+}
+#timer-display.active {
+    display: flex;
 }
 .timer-status {
     text-align: center; font-size: 22px; font-weight: 800;
@@ -568,10 +589,3 @@ input[type="range"]::-moz-range-thumb {
 
 /* ===== Balance separator ===== */
 .divider { height: 1px; background: var(--border); margin: 16px 0; }
-
-/* ===== Smooth scrollbar ===== */
-.tab-view::-webkit-scrollbar { width: 4px; }
-.tab-view::-webkit-scrollbar-track { background: transparent; }
-.tab-view::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 4px; }
-.bottom-sheet::-webkit-scrollbar { width: 4px; }
-.bottom-sheet::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 4px; }
