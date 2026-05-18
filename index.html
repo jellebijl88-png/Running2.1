@@ -154,196 +154,221 @@
         </div>
     </div>
 
+    <!-- SCROLLABLE MAIN CONTENT AREA -->
+    <div class="scroll-content">
 
-    <div id="tab-home" class="tab-view active">
-        <div class="user-header">
-            <div class="avatar">🏃</div>
-            <div>
-                <h1 style="margin:0;">JellyLegs</h1>
-            </div>
-        </div>
-
-        <button class="btn-start-run" onclick="UI.openTab('training', document.querySelectorAll('.nav-item')[1])">
-            KIES PLAN & START SESSIE
-            <small>Bekijk je schema's en begin vandaag nog</small>
-        </button>
-
-        <!-- Recente Activiteit -->
-        <h3 class="section-title">Recente Activiteit</h3>
-        <div class="card recent-activity-card">
-            <div class="recent-activity-layout">
-                <div id="recent-activity-map" class="activity-map-placeholder">
-                    <div class="map-mini-route"></div>
+        <div id="tab-home" class="tab-view active">
+            <div class="user-header">
+                <div class="avatar">🏃</div>
+                <div>
+                    <h1 style="margin:0;">JellyLegs</h1>
                 </div>
-                <div class="activity-details">
-                    <span id="recent-activity-date" class="activity-date">Geen sessies</span>
-                    <span id="recent-activity-distance" class="activity-distance">-- KM</span>
-                    <div class="activity-meta">
-                        <span id="recent-activity-time" class="activity-meta-item">Tijd --:--</span>
-                        <span id="recent-activity-pace" class="activity-meta-item">Tempo --:-- min/km</span>
+            </div>
+
+            <button class="btn-start-run" onclick="UI.openTab('training', document.querySelectorAll('.nav-item')[1])">
+                KIES PLAN & START SESSIE
+                <small>Bekijk je schema's en begin vandaag nog</small>
+            </button>
+
+            <!-- Recente Activiteit -->
+            <h3 class="section-title">Recente Activiteit</h3>
+            <div class="card recent-activity-card">
+                <div class="recent-activity-layout">
+                    <div id="recent-activity-map" class="activity-map-placeholder">
+                        <div class="map-mini-route"></div>
+                    </div>
+                    <div class="activity-details">
+                        <span id="recent-activity-date" class="activity-date">Geen sessies</span>
+                        <span id="recent-activity-distance" class="activity-distance">-- KM</span>
+                        <div class="activity-meta">
+                            <span id="recent-activity-time" class="activity-meta-item">Tijd --:--</span>
+                            <span id="recent-activity-pace" class="activity-meta-item">Tempo --:-- min/km</span>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Week Totaal -->
-        <div class="week-totaal-section">
-            <div class="week-totaal-header">
-                <h3 class="section-title" style="margin:0;">Week Totaal</h3>
-                <span class="chevron-right">></span>
-            </div>
-            <div class="progress-bar-track">
-                <div id="week-progress-fill" class="progress-bar-fill" style="width:5%;"></div>
-            </div>
-            <div class="progress-labels">
-                <span id="week-progress-current">2.3 KM gelopen</span>
-                <span id="week-progress-target">47.68</span>
-            </div>
-        </div>
-
-        <div class="dashboard">
-            <div class="card" style="margin-bottom:0">
-                <div id="streak-container" class="streak-badge" style="display:none">🔥 <span id="dash-streak">0</span> SESSIES</div>
-                <span class="dash-label">Totaal Gelopen</span>
-                <span class="dash-val" id="dash-total">0.0</span> <span style="font-weight:600; color:var(--text-muted); font-size:13px;">KM</span>
-            </div>
-            <div class="card" style="margin-bottom:0">
-                <span class="dash-label">Snelste Pace</span>
-                <span class="dash-val" id="dash-pb" style="color:var(--text-main);">--</span> <span style="font-weight:600; color:var(--text-muted); font-size:13px;">/km</span>
-            </div>
-        </div>
-
-        <div class="card">
-            <span class="dash-label">🏆 Persoonlijke Records</span>
-            <div class="pr-list">
-                <div class="pr-card"><span class="dash-label">1 KM</span><span class="pr-val" id="pr-1k">--</span><span style="font-size:9px;color:var(--text-muted);display:block;margin-top:2px" id="pr-1k-time"></span></div>
-                <div class="pr-card"><span class="dash-label">3 KM</span><span class="pr-val" id="pr-3k">--</span><span style="font-size:9px;color:var(--text-muted);display:block;margin-top:2px" id="pr-3k-time"></span></div>
-                <div class="pr-card"><span class="dash-label">5 KM</span><span class="pr-val" id="pr-5k">--</span><span style="font-size:9px;color:var(--text-muted);display:block;margin-top:2px" id="pr-5k-time"></span></div>
-            </div>
-        </div>
-
-        <div style="display:flex; justify-content:space-between; align-items:center; margin: 20px 0 10px;">
-            <h3 style="font-size:16px;">Logboek (Recent)</h3>
-            <button class="clear-history-btn" onclick="DB.clearAllHistory()">Wis alles</button>
-        </div>
-        <div id="history-list"></div>
-    </div>
-
-    <div id="tab-training" class="tab-view">
-        <h2 style="margin-top:6px;">Training</h2>
-        <div class="card">
-            <span class="dash-label">Huidig Plan</span>
-            <select id="plan-select" onchange="APP.saveSelectedPlan()"></select>
-        </div>
-        <div id="app-list"></div>
-        <div class="card" id="baseline-card">
-            <span class="dash-label">📊 Basis Niveau & Schema's</span>
-            <p style="margin-bottom: 14px;">Bepaal je startniveau met de 30-minuten test of genereer direct een op maat gemaakt AI-schema.</p>
-            <button class="btn btn-primary" onclick="APP.startBaselineTest()">START BASELINE TEST</button>
-            <button class="btn btn-ghost" style="margin-top: 10px; color: var(--primary); background: var(--primary-bg); border: none;" onclick="UI.openCustomPlanSheet()">GENEREER CUSTOM PLAN</button>
-        </div>
-    </div>
-
-    <div id="tab-data" class="tab-view">
-        <h2 style="margin-top:6px;">Statistieken</h2>
-        <div class="card">
-            <span class="dash-label">Wekelijkse Opbouw (Volume)</span>
-            <div class="chart-container" style="height: 170px;"><canvas id="weeklyVolumeChart"></canvas></div>
-        </div>
-        <div class="card">
-            <span class="dash-label">Pace-ontwikkeling</span>
-            <div class="chart-container" style="height: 140px;"><canvas id="paceTrendChart"></canvas></div>
-        </div>
-        <div class="card">
-            <span class="dash-label">Wekelijkse vergelijking</span>
-            <div id="weekly-comparison"></div>
-        </div>
-        <div class="card">
-            <span class="dash-label">Trainingslogboek per week</span>
-            <div id="data-timeline"></div>
-        </div>
-        <div class="card">
-            <span class="dash-label">Data Exporteren</span>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                <button class="btn-ghost" onclick="APP.exportAsCSV()" style="padding:14px;"><span style="font-size:20px;">📊</span><span style="font-size:10px; margin-top:2px;">Exporteer CSV</span></button>
-                <button class="btn-ghost" onclick="APP.exportAllAsJSON()" style="padding:14px;"><span style="font-size:20px;">💾</span><span style="font-size:10px; margin-top:2px;">JSON Backup</span></button>
-            </div>
-        </div>
-    </div>
-
-    <div id="tab-profile" class="tab-view">
-        <h2 style="margin-top:6px;">Instellingen</h2>
-        <div class="card">
-            <span class="dash-label">Account Gegevens</span>
-            <div style="display: grid; grid-template-columns: 1fr 80px; gap: 10px; align-items: center;">
-                <span style="font-size: 14px; font-weight:600;">Gewicht (kg)</span>
-                <input type="number" id="user-weight" min="30" max="200" value="75" style="margin:0; text-align:center;" onchange="DB.saveUserProfile()">
-                <span style="font-size: 14px; font-weight:600;">Lengte (cm)</span>
-                <input type="number" id="user-height" min="100" max="220" value="180" style="margin:0; text-align:center;" onchange="DB.saveUserProfile()">
-                <span style="font-size: 14px; font-weight:600;">Leeftijd</span>
-                <input type="number" id="user-age" min="12" max="99" value="30" style="margin:0; text-align:center;" onchange="DB.saveUserProfile()">
-                <span style="font-size: 14px; font-weight:600;">Geslacht</span>
-                <select id="user-gender" style="margin:0; padding:12px; text-align:center;" onchange="DB.saveUserProfile()">
-                    <option value="male">Man</option>
-                    <option value="female">Vrouw</option>
-                </select>
-            </div>
-            <div id="save-feedback" style="color: var(--success); text-align: center; font-size: 12px; font-weight: 700; margin-top: 10px; opacity: 0; transition: 0.4s;">Opgeslagen ✔️</div>
-        </div>
-
-        <div class="card">
-            <span class="dash-label">App Voorkeuren</span>
-            
-            <div class="slider-group">
-                <div class="slider-header">
-                    <span class="slider-warmup-label">🔥 Warming-up tijd</span>
-                    <span class="slider-value slider-warmup-label" id="warmup-val">5</span>
+            <!-- Week Totaal -->
+            <div class="week-totaal-section">
+                <div class="week-totaal-header">
+                    <h3 class="section-title" style="margin:0;">Week Totaal</h3>
+                    <span class="chevron-right">></span>
                 </div>
-                <span style="font-size:11px; color:var(--text-muted);">minuten</span>
-                <input type="range" id="warmup-time" min="1" max="15" value="5" oninput="DB.updateWarmupCoolDown()">
-            </div>
-            
-            <div class="slider-group">
-                <div class="slider-header">
-                    <span class="slider-cooldown-label">❄️ Cool-down tijd</span>
-                    <span class="slider-value slider-cooldown-label" id="cooldown-val">5</span>
+                <div class="progress-bar-track">
+                    <div id="week-progress-fill" class="progress-bar-fill" style="width:5%;"></div>
                 </div>
-                <span style="font-size:11px; color:var(--text-muted);">minuten</span>
-                <input type="range" id="cooldown-time" min="1" max="15" value="5" oninput="DB.updateWarmupCoolDown()">
+                <div class="progress-labels">
+                    <span id="week-progress-current">2.3 KM gelopen</span>
+                    <span id="week-progress-target">47.68</span>
+                </div>
             </div>
-            
-            <div class="divider"></div>
-            
-            <div class="toggle-container" onclick="UI.toggleTheme()">
-                <span style="flex:1; font-weight: 600; font-size:14px;">Donkere Modus</span>
-                <div class="toggle-switch" id="theme-toggle-switch"></div>
+
+            <div class="dashboard">
+                <div class="card" style="margin-bottom:0">
+                    <div id="streak-container" class="streak-badge" style="display:none">🔥 <span id="dash-streak">0</span> SESSIES</div>
+                    <span class="dash-label">Totaal Gelopen</span>
+                    <span class="dash-val" id="dash-total">0.0</span> <span style="font-weight:600; color:var(--text-muted); font-size:13px;">KM</span>
+                </div>
+                <div class="card" style="margin-bottom:0">
+                    <span class="dash-label">Snelste Pace</span>
+                    <span class="dash-val" id="dash-pb" style="color:var(--text-main);">--</span> <span style="font-weight:600; color:var(--text-muted); font-size:13px;">/km</span>
+                </div>
             </div>
-            <div class="toggle-container" onclick="UI.toggleLiveMap()">
-                <span style="flex:1; font-weight: 600; font-size:14px;">Live Kaart tonen</span>
-                <div class="toggle-switch" id="live-map-toggle"></div>
+
+            <div class="card">
+                <span class="dash-label">🏆 Persoonlijke Records</span>
+                <div class="pr-list">
+                    <div class="pr-card"><span class="dash-label">1 KM</span><span class="pr-val" id="pr-1k">--</span><span style="font-size:9px;color:var(--text-muted);display:block;margin-top:2px" id="pr-1k-time"></span></div>
+                    <div class="pr-card"><span class="dash-label">3 KM</span><span class="pr-val" id="pr-3k">--</span><span style="font-size:9px;color:var(--text-muted);display:block;margin-top:2px" id="pr-3k-time"></span></div>
+                    <div class="pr-card"><span class="dash-label">5 KM</span><span class="pr-val" id="pr-5k">--</span><span style="font-size:9px;color:var(--text-muted);display:block;margin-top:2px" id="pr-5k-time"></span></div>
+                </div>
             </div>
-            
-            <span style="font-size: 14px; font-weight:600; margin-top:14px; display:block;">Coach Stem</span>
-            <select id="voice-select"></select>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin: 20px 0 10px;">
+                <h3 style="font-size:16px;">Logboek (Recent)</h3>
+                <button class="clear-history-btn" onclick="DB.clearAllHistory()">Wis alles</button>
+            </div>
+            <div id="history-list"></div>
         </div>
 
-        <div class="card" id="hr-zones-card">
-            <span class="dash-label">❤️ Hartslagzones</span>
-            <div id="hr-zones-display"></div>
-            <button class="btn btn-ghost" style="margin-top:14px; background: var(--accent-bg); color: var(--accent); border: none;" onclick="APP.connectHeartRateMonitor()">Koppel Bluetooth HR</button>
+        <div id="tab-training" class="tab-view">
+            <h2 style="margin-top:6px;">Training</h2>
+            <div class="card">
+                <span class="dash-label">Huidig Plan</span>
+                <select id="plan-select" onchange="APP.saveSelectedPlan()"></select>
+            </div>
+            <div id="app-list"></div>
+            <div class="card" id="baseline-card">
+                <span class="dash-label">📊 Basis Niveau & Schema's</span>
+                <p style="margin-bottom: 14px;">Bepaal je startniveau met de 30-minuten test of genereer direct een op maat gemaakt AI-schema.</p>
+                <button class="btn btn-primary" onclick="APP.startBaselineTest()">START BASELINE TEST</button>
+                <button class="btn btn-ghost" style="margin-top: 10px; color: var(--primary); background: var(--primary-bg); border: none;" onclick="UI.openCustomPlanSheet()">GENEREER CUSTOM PLAN</button>
+            </div>
         </div>
 
-        <div class="card">
-            <span class="dash-label">Systeem</span>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px;">
-                <span style="font-size: 14px; font-weight:600;">Versie v1.5.0</span>
-                <button class="clear-history-btn" style="color:var(--text-main); background:var(--bg-secondary);" onclick="UI.showChangelog()">Wijzigingen</button>
+        <div id="tab-data" class="tab-view">
+            <h2 style="margin-top:6px;">Statistieken</h2>
+            <div class="card">
+                <span class="dash-label">Wekelijkse Opbouw (Volume)</span>
+                <div class="chart-container" style="height: 170px;"><canvas id="weeklyVolumeChart"></canvas></div>
             </div>
-            <button class="btn btn-ghost" style="background:var(--danger-bg); color:var(--danger); border:none;" onclick="DB.clearAllHistory()">WIS ALLE DATA</button>
+            <div class="card">
+                <span class="dash-label">Pace-ontwikkeling</span>
+                <div class="chart-container" style="height: 140px;"><canvas id="paceTrendChart"></canvas></div>
+            </div>
+            <div class="card">
+                <span class="dash-label">Wekelijkse vergelijking</span>
+                <div id="weekly-comparison"></div>
+            </div>
+            <div class="card">
+                <span class="dash-label">Trainingslogboek per week</span>
+                <div id="data-timeline"></div>
+            </div>
+            <div class="card">
+                <span class="dash-label">Data Exporteren</span>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <button class="btn-ghost" onclick="APP.exportAsCSV()" style="padding:14px;"><span style="font-size:20px;">📊</span><span style="font-size:10px; margin-top:2px;">Exporteer CSV</span></button>
+                    <button class="btn-ghost" onclick="APP.exportAllAsJSON()" style="padding:14px;"><span style="font-size:20px;">💾</span><span style="font-size:10px; margin-top:2px;">JSON Backup</span></button>
+                </div>
+            </div>
         </div>
+
+        <div id="tab-profile" class="tab-view">
+            <h2 style="margin-top:6px;">Instellingen</h2>
+            <div class="card">
+                <span class="dash-label">Account Gegevens</span>
+                <div style="display: grid; grid-template-columns: 1fr 80px; gap: 10px; align-items: center;">
+                    <span style="font-size: 14px; font-weight:600;">Gewicht (kg)</span>
+                    <input type="number" id="user-weight" min="30" max="200" value="75" style="margin:0; text-align:center;" onchange="DB.saveUserProfile()">
+                    <span style="font-size: 14px; font-weight:600;">Lengte (cm)</span>
+                    <input type="number" id="user-height" min="100" max="220" value="180" style="margin:0; text-align:center;" onchange="DB.saveUserProfile()">
+                    <span style="font-size: 14px; font-weight:600;">Leeftijd</span>
+                    <input type="number" id="user-age" min="12" max="99" value="30" style="margin:0; text-align:center;" onchange="DB.saveUserProfile()">
+                    <span style="font-size: 14px; font-weight:600;">Geslacht</span>
+                    <select id="user-gender" style="margin:0; padding:12px; text-align:center;" onchange="DB.saveUserProfile()">
+                        <option value="male">Man</option>
+                        <option value="female">Vrouw</option>
+                    </select>
+                </div>
+                <div id="save-feedback" style="color: var(--success); text-align: center; font-size: 12px; font-weight: 700; margin-top: 10px; opacity: 0; transition: 0.4s;">Opgeslagen ✔️</div>
+            </div>
+
+            <div class="card">
+                <span class="dash-label">App Voorkeuren</span>
+                
+                <div class="slider-group">
+                    <div class="slider-header">
+                        <span class="slider-warmup-label">🔥 Warming-up tijd</span>
+                        <span class="slider-value slider-warmup-label" id="warmup-val">5</span>
+                    </div>
+                    <span style="font-size:11px; color:var(--text-muted);">minuten</span>
+                    <input type="range" id="warmup-time" min="1" max="15" value="5" oninput="DB.updateWarmupCoolDown()">
+                </div>
+                
+                <div class="slider-group">
+                    <div class="slider-header">
+                        <span class="slider-cooldown-label">❄️ Cool-down tijd</span>
+                        <span class="slider-value slider-cooldown-label" id="cooldown-val">5</span>
+                    </div>
+                    <span style="font-size:11px; color:var(--text-muted);">minuten</span>
+                    <input type="range" id="cooldown-time" min="1" max="15" value="5" oninput="DB.updateWarmupCoolDown()">
+                </div>
+                
+                <div class="divider"></div>
+                
+                <div class="toggle-container" onclick="UI.toggleTheme()">
+                    <span style="flex:1; font-weight: 600; font-size:14px;">Donkere Modus</span>
+                    <div class="toggle-switch" id="theme-toggle-switch"></div>
+                </div>
+                <div class="toggle-container" onclick="UI.toggleLiveMap()">
+                    <span style="flex:1; font-weight: 600; font-size:14px;">Live Kaart tonen</span>
+                    <div class="toggle-switch" id="live-map-toggle"></div>
+                </div>
+                
+                <span style="font-size: 14px; font-weight:600; margin-top:14px; display:block;">Coach Stem</span>
+                <select id="voice-select"></select>
+            </div>
+
+            <div class="card" id="hr-zones-card">
+                <span class="dash-label">❤️ Hartslagzones</span>
+                <div id="hr-zones-display"></div>
+                <button class="btn btn-ghost" style="margin-top:14px; background: var(--accent-bg); color: var(--accent); border: none;" onclick="APP.connectHeartRateMonitor()">Koppel Bluetooth HR</button>
+            </div>
+
+            <div class="card">
+                <span class="dash-label">Systeem</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px;">
+                    <span style="font-size: 14px; font-weight:600;">Versie v1.5.0</span>
+                    <button class="clear-history-btn" style="color:var(--text-main); background:var(--bg-secondary);" onclick="UI.showChangelog()">Wijzigingen</button>
+                </div>
+                <button class="btn btn-ghost" style="background:var(--danger-bg); color:var(--danger); border:none;" onclick="DB.clearAllHistory()">WIS ALLE DATA</button>
+            </div>
+        </div>
+
     </div>
+    <!-- END SCROLLABLE CONTENT -->
 
-    <div id="timer-display" class="tab-view" style="position:absolute; inset:0; background:var(--bg-dark); z-index:3500; padding-top: 20px;">
+    <nav class="bottom-nav">
+        <button class="nav-item active" onclick="UI.openTab('home', this)">
+            <div class="nav-icon">🏠</div>
+            <div class="nav-label">Home</div>
+        </button>
+        <button class="nav-item" onclick="UI.openTab('training', this)">
+            <div class="nav-icon">📋</div>
+            <div class="nav-label">Schema</div>
+        </button>
+        <button class="nav-item" onclick="UI.openTab('data', this)">
+            <div class="nav-icon">📊</div>
+            <div class="nav-label">Data</div>
+        </button>
+        <button class="nav-item" onclick="UI.openTab('profile', this)">
+            <div class="nav-icon">⚙️</div>
+            <div class="nav-label">Profiel</div>
+        </button>
+    </nav>
+
+    <!-- Timer overlays everything (position: absolute) -->
+    <div id="timer-display">
         <h2 style="text-align:center; margin-bottom:8px;">Active Tracker</h2>
         <div id="live-training-map"></div>
         
@@ -375,25 +400,6 @@
             <button class="btn" style="background:var(--danger); color:white; box-shadow:0 4px 14px rgba(255,59,48,0.3);" onclick="APP.confirmStop()">STOP</button>
         </div>
     </div>
-
-    <nav class="bottom-nav">
-        <button class="nav-item active" onclick="UI.openTab('home', this)">
-            <div class="nav-icon">🏠</div>
-            <div class="nav-label">Home</div>
-        </button>
-        <button class="nav-item" onclick="UI.openTab('training', this)">
-            <div class="nav-icon">📋</div>
-            <div class="nav-label">Schema</div>
-        </button>
-        <button class="nav-item" onclick="UI.openTab('data', this)">
-            <div class="nav-icon">📊</div>
-            <div class="nav-label">Data</div>
-        </button>
-        <button class="nav-item" onclick="UI.openTab('profile', this)">
-            <div class="nav-icon">⚙️</div>
-            <div class="nav-label">Profiel</div>
-        </button>
-    </nav>
 
 </div>
 
