@@ -180,7 +180,7 @@ const UI = {
 
     openTab: function(tabName, element) {
         const fn = () => {
-            document.querySelectorAll('.tab-view').forEach(t => { if(t.id !== 'timer-display') t.classList.remove('active'); });
+            document.querySelectorAll('.tab-view').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             document.getElementById('tab-' + tabName).classList.add('active');
             element.classList.add('active');
@@ -468,11 +468,18 @@ const UI = {
 
     initLiveMap: function() {
         if (!this.liveMapEnabled) return;
-        document.getElementById('live-training-map').style.display = 'block';
-        if (this.liveMapInstance) this.liveMapInstance.remove();
-        this.liveMapInstance = L.map('live-training-map', { zoomControl: false, attributionControl: false });
+        var mapEl = document.getElementById('live-training-map');
+        if (this.liveMapInstance) {
+            this.liveMapInstance.invalidateSize();
+            return;
+        }
+        this.liveMapInstance = L.map(mapEl, { zoomControl: false, attributionControl: false });
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.liveMapInstance);
         this.livePolyline = L.polyline([], { color: '#ff6b00', weight: 5 }).addTo(this.liveMapInstance);
+        // Ensure map tiles render correctly now that the element is visible
+        setTimeout(function() {
+            if (this.liveMapInstance) this.liveMapInstance.invalidateSize();
+        }.bind(this), 50);
     },
 
     updateLiveMap: function(route) {
