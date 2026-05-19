@@ -473,13 +473,34 @@ const UI = {
             this.liveMapInstance.invalidateSize();
             return;
         }
-        this.liveMapInstance = L.map(mapEl, { zoomControl: false, attributionControl: false });
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(this.liveMapInstance);
+        // Force element to have explicit dimensions before creating map
+        mapEl.style.height = '160px';
+        mapEl.style.width = '100%';
+        
+        // Use a cached tile layer to avoid re-downloading tiles
+        var tileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+        var tileLayer = L.tileLayer(tileUrl, { 
+            zoomControl: false, 
+            attributionControl: false,
+            className: 'leaflet-fade-anim'
+        });
+        
+        this.liveMapInstance = L.map(mapEl, { 
+            zoomControl: false, 
+            attributionControl: false,
+            fadeAnimation: false,
+            zoomAnimation: false,
+            markerZoomAnimation: false
+        });
+        tileLayer.addTo(this.liveMapInstance);
         this.livePolyline = L.polyline([], { color: '#ff6b00', weight: 5 }).addTo(this.liveMapInstance);
-        // Ensure map tiles render correctly now that the element is visible
-        setTimeout(function() {
-            if (this.liveMapInstance) this.liveMapInstance.invalidateSize();
-        }.bind(this), 50);
+        
+        // Use requestAnimationFrame instead of setTimeout for more reliable sizing
+        requestAnimationFrame(function() {
+            if (this.liveMapInstance) {
+                this.liveMapInstance.invalidateSize();
+            }
+        }.bind(this));
     },
 
     updateLiveMap: function(route) {
@@ -869,6 +890,24 @@ const APP = {
         return Math.round(met * weightKg * (durationMin / 60));
     },
 
+    updateGPSStatus: function(status, accuracy, color) {
+        var dot = document.getElementById('gps-dot');
+        var text = document.getElementById('gps-text');
+        var accEl = document.getElementById('gps-accuracy');
+        if (!dot || !text) return;
+        dot.style.background = color || 'var(--text-muted)';
+        text.innerText = status;
+        text.style.color = color || 'var(--text-muted)';
+        if (accEl) {
+            if (accuracy > 0) {
+                accEl.innerText = '±' + Math.round(accuracy) + 'm';
+                accEl.style.color = accuracy <= 10 ? 'var(--success)' : accuracy <= 25 ? 'var(--warning)' : 'var(--danger)';
+            } else {
+                accEl.innerText = '';
+            }
+        }
+    },
+
     vibrate: function(pattern) { if ('vibrate' in navigator) navigator.vibrate(pattern); },
     speak: function(t) {
         if (!t) return;
@@ -908,7 +947,34 @@ const APP = {
     },
 
     startGPS: function() {
+        APP.updateGPSStatus('GPS zoeken...', 0, 'var(--warning)');
+        
+        // Timeout: if no fix within 10 seconds, show warning
+        var gpsTimeout = setTimeout(function() {
+            APP.updateGPSStatus('GPS zwak signaal', 0, 'var(--danger)');
+        }, 10000);
+
         STATE.watchId = navigator.geolocation.watchPosition(function(p) {
+            // Clear timeout once we get first fix
+            clearTimeout(gpsTimeout);
+            
+            // Update GPS status with accuracy
+            var acc = p.coords.accuracy;
+            var status, color;
+            if (acc <= 10) {
+                status = 'GPS sterk';
+                color = 'var(--success)';
+            } else if (acc <= 25) {
+                status = 'GPS goed';
+                color = 'var(--success)';
+            } else if (acc <= 40) {
+                status = 'GPS matig';
+                color = 'var(--warning)';
+            } else {
+                status = 'GPS zwak';
+                color = 'var(--danger)';
+            }
+            APP.updateGPSStatus(status, acc, color);
             if (STATE.isPaused || p.coords.accuracy > 40) return;
             if (p.coords.speed !== null && p.coords.speed < 0.4) return;
             var lat = p.coords.latitude, lng = p.coords.longitude, now = Date.now();
@@ -1003,345 +1069,473 @@ const APP = {
         document.getElementById('stat-run-bar').style.width = rp + '%';
         document.getElementById('stat-jog-bar').style.width = jp + '%';
         document.getElementById('stat-walk-bar').style.width = wp + '%';
-        document.getElementById('stat-sprint-time').innerText = this.formatT(Math.round(ss));
-        document.getElementById('stat-run-time').innerText = this.formatT(Math.round(rs));
-        document.getElementById('stat-jog-time').innerText = this.formatT(Math.round(js));
-        document.getElementById('stat-walk-time').innerText = this.formatT(Math.round(ws));
 
-        if (STATE.activePlanKey !== undefined) LS.set('done_' + STATE.activePlanKey + '_' + STATE.activeWeekIdx + '_' + STATE.activeType, 'true');
+        document.getElementById('stat-sprint-time').innerText = this.formatT(ss);
+        document.getElementById('stat-run-time').innerText = this.formatT(rs);
+        document.getElementById('stat-jog-time').innerText = this.formatT(js);
+        document.getElementById('stat-walk-time').innerText = this.formatT(ws);
 
-        var run = { d: new Date().toLocaleDateString('nl-NL'), n: document.getElementById('pre-title').innerText, dist: STATE.totalDist.toFixed(2), pace: pace, duration: ts, calories: cal, route: STATE.currentRoute, paceHistory: STATE.paceData };
-        DB.add(run, function() {
-            UI.openResultScreen();
-            setTimeout(function() { UI.renderResultMap(run.route); UI.renderPaceChart(run.paceHistory); }, 400);
-        });
-    },
-
-    viewRun: function(id) {
-        DB.get(id, function(run) {
-            document.getElementById('res-title').innerText = run.n;
-            document.getElementById('res-d').innerText = run.dist;
-            document.getElementById('res-p').innerText = run.pace;
-            document.getElementById('res-time').innerText = APP.formatT(run.duration || 0);
-            document.getElementById('res-cal').innerText = run.calories || 0;
-            STATE.viewedRoute = run.route || [];
-            UI.openResultScreen();
-            var ts = run.duration || 0, pd = run.paceHistory || [];
-            var ss = 0, rs = 0, js = 0, ws = 0;
-            if (pd.length > 0) {
-                pd.forEach(function(p) { var v = parseFloat(p); if (v < 4.0) ss += 30; else if (v < 6.5) rs += 30; else if (v < 9.0) js += 30; else ws += 30; });
-                var tot = ss + rs + js + ws;
-                if (tot > 0) { var r = ts / tot; ss *= r; rs *= r; js *= r; ws *= r; }
-            } else { var ap = parseFloat(run.pace); if (ap < 4.0) ss = ts; else if (ap < 6.5) rs = ts; else if (ap < 9.0) js = ts; else ws = ts; }
-            var tc = ss + rs + js + ws;
-            var sp = tc > 0 ? Math.round((ss / tc) * 100) : 0; var rp = tc > 0 ? Math.round((rs / tc) * 100) : 0;
-            var jp = tc > 0 ? Math.round((js / tc) * 100) : 0; var wp = tc > 0 ? Math.max(0, 100 - sp - rp - jp) : 0;
-            document.getElementById('stat-sprint-percent').innerText = sp + '%'; document.getElementById('stat-run-percent').innerText = rp + '%';
-            document.getElementById('stat-jog-percent').innerText = jp + '%'; document.getElementById('stat-walk-percent').innerText = wp + '%';
-            document.getElementById('stat-sprint-bar').style.width = sp + '%'; document.getElementById('stat-run-bar').style.width = rp + '%';
-            document.getElementById('stat-jog-bar').style.width = jp + '%'; document.getElementById('stat-walk-bar').style.width = wp + '%';
-            document.getElementById('stat-sprint-time').innerText = APP.formatT(Math.round(ss)); document.getElementById('stat-run-time').innerText = APP.formatT(Math.round(rs));
-            document.getElementById('stat-jog-time').innerText = APP.formatT(Math.round(js)); document.getElementById('stat-walk-time').innerText = APP.formatT(Math.round(ws));
-            setTimeout(function() { UI.renderResultMap(run.route || []); UI.renderPaceChart(run.paceHistory || []); }, 400);
-        });
-    },
-
-    renderWeekTotal: function(runs) {
-        var wd = DB.processWeeklyData(runs);
-        var currentWeek = wd.length > 0 ? wd[0] : null;
-        var currentDist = currentWeek ? currentWeek.totalDist : 0;
-        var ubv = parseFloat(LS.get('user_base_volume', '5')) || 5;
-        var target = Math.max(ubv * 1.1, 5);
-        var pct = Math.min((currentDist / target) * 100, 100);
-        
-        var fill = document.getElementById('week-progress-fill');
-        var currentEl = document.getElementById('week-progress-current');
-        var targetEl = document.getElementById('week-progress-target');
-        
-        if (fill) fill.style.width = Math.max(2, pct) + '%';
-        if (currentEl) currentEl.innerText = currentDist.toFixed(1) + ' KM gelopen';
-        if (targetEl) targetEl.innerText = target.toFixed(1);
+        UI.renderResultMap(STATE.currentRoute);
+        UI.renderPaceChart(STATE.paceData);
+        UI.openResultScreen();
     },
 
     startBaselineTest: function() {
-        STATE.activePlanKey = 'baseline'; STATE.activeWeekIdx = 0; STATE.activeType = 't1';
-        var ws = (parseInt(LS.get('warmup_time', '5'))) * 60; var cs = (parseInt(LS.get('cooldown_time', '5'))) * 60;
-        STATE.sessionBlocks = [{ t: ws, s: 'Warming-up', m: 'warmup' }, { t: 1800, s: 'Loop op je eigen tempo', m: 'run' }, { t: cs, s: 'Cool-down', m: 'warmup' }];
-        STATE.sessionBlocks = this.applyCustomTimings(STATE.sessionBlocks);
-        document.getElementById('pre-title').innerText = '📊 30 Minuten Baseline Test';
+        var planKey = 'custom';
+        STATE.schemas[planKey] = {
+            name: 'Baseline Test',
+            weeks: [{ w: 1, t1: { label: '📊 Baseline Test (30 min)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Loop rustig in eigen tempo', t: 1800 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } }]
+        };
+        var ps = document.getElementById('plan-select');
+        ps.innerHTML = Object.keys(STATE.schemas).map(function(k) { return '<option value="' + k + '">' + STATE.schemas[k].name + '</option>'; }).join('');
+        ps.value = planKey;
+        LS.set('strive_selected_plan', planKey);
+        UI.renderPlan();
+        var training = STATE.schemas[planKey].weeks[0].t1;
+        STATE.sessionBlocks = this.applyCustomTimings(training.b);
+        document.getElementById('pre-title').innerText = training.label;
         document.getElementById('pre-time').innerText = Math.round(STATE.sessionBlocks.reduce(function(a, b) { return a + b.t; }, 0) / 60) + ' min';
-        document.getElementById('pre-type').innerText = 'Basis Test';
-        var mt = Math.max.apply(null, STATE.sessionBlocks.map(function(b) { return b.t; }));
-        document.getElementById('pre-chart').innerHTML = STATE.sessionBlocks.map(function(b) { return '<div class="bar ' + b.m + '" style="height:' + Math.max(15, (b.t / mt) * 100) + '%"><span>' + Math.round(b.t / 60) + 'm</span></div>'; }).join('');
+        document.getElementById('pre-type').innerText = 'Baseline Test';
+        var maxT = Math.max.apply(null, STATE.sessionBlocks.map(function(b) { return b.t; }));
+        document.getElementById('pre-chart').innerHTML = STATE.sessionBlocks.map(function(b) { return '<div class="bar ' + b.m + '" style="height:' + Math.max(15, (b.t / maxT) * 100) + '%"><span>' + Math.round(b.t / 60) + 'm</span></div>'; }).join('');
         document.getElementById('preview-overlay').style.display = 'flex';
-    },
-
-    _generateSessionBlocks: function(type, durationMin, ws, cs, age) {
-        ws = ws || (parseInt(LS.get('warmup_time', '5'))) * 60;
-        cs = cs || (parseInt(LS.get('cooldown_time', '5'))) * 60;
-        var workTime = (durationMin * 60) - ws - cs;
-        if (workTime < 60) workTime = 60;
-
-        if (type === 'EASY' || type === 'RECOVERY') {
-            return [{ t: ws, s: 'Warming-up', m: 'warmup' }, { t: Math.round(workTime), s: 'Zone 2 Easy Run (Rustig)', m: 'run' }, { t: cs, s: 'Cool-down', m: 'warmup' }];
-        }
-        if (type === 'LONG') {
-            var stridesTime = Math.min(workTime, 300); var longRunTime = workTime - stridesTime;
-            var blocks = [{ t: ws, s: 'Warming-up', m: 'warmup' }, { t: Math.round(longRunTime), s: '🏃 Lange Duurloop (Zone 2)', m: 'run' }];
-            if (stridesTime >= 240) { for (var si = 0; si < 4; si++) { blocks.push({ t: 30, s: '⚡ Strides', m: 'sprint' }); blocks.push({ t: 30, s: '🟢 Rustig joggen', m: 'jog' }); } }
-            blocks.push({ t: cs, s: 'Cool-down', m: 'warmup' }); return blocks;
-        }
-        if (type === 'HIT') {
-            var cycleTime = 4 * 60 + 3 * 60; var numCycles = Math.max(2, Math.min(5, Math.floor(workTime / cycleTime)));
-            var actualWork = numCycles * 4 * 60; var actualRest = numCycles * 3 * 60; var remaining = workTime - actualWork - actualRest;
-            var blocks = [{ t: ws, s: 'Warming-up', m: 'warmup' }];
-            for (var ci = 0; ci < numCycles; ci++) { blocks.push({ t: 240, s: '🔴 HIT: 4min Tempo', m: 'run' }); blocks.push({ t: 180, s: '🟢 Actief Herstel', m: 'jog' }); }
-            if (remaining > 30) blocks.push({ t: Math.round(remaining), s: '✅ Uitlopen', m: 'jog' });
-            blocks.push({ t: cs, s: 'Cool-down', m: 'warmup' }); return blocks;
-        }
-        return [{ t: ws, s: 'Warming-up', m: 'warmup' }, { t: Math.round(workTime), s: 'Duurloop', m: 'run' }, { t: cs, s: 'Cool-down', m: 'warmup' }];
     },
 
     generateCustomPlan: function() {
         var freq = parseInt(document.getElementById('train-frequency').value);
         var goal = document.getElementById('train-goal').value;
-        var ubv = parseFloat(document.getElementById('user-base-volume').value) || 5;
-        var age = parseInt(LS.get('user_age', '30'));
+        var baseVolume = parseFloat(document.getElementById('user-base-volume').value) || 5;
+        if (freq < 2) { this.speak('Minimaal 2 trainingen per week vereist'); return; }
         var goalDistMap = { '3km': 3, '5km': 5, '10km': 10, 'halve': 21.1 };
         var goalDist = goalDistMap[goal] || 5;
+        var vdot = this.VDOT.fromPaceMinPerKm(baseVolume > 0 ? (freq * 30) / baseVolume : 0);
+        if (vdot < 20) vdot = 30;
+        var acwrData = DB.getAll(function(runs) {
+            var acwr = APP.ACWR.calculate(runs, baseVolume);
+            return acwr;
+        });
+        var targetVolume = Math.max(baseVolume * 1.2, goalDist * 0.6);
+        var volumes = this.PERIODIZATION.generateWeeklyVolumes(targetVolume, 8);
+        var plan = { name: freq + 'x/' + goal + ' (AI)', weeks: [] };
+        for (var w = 0; w < 8; w++) {
+            var weekVolume = volumes[w] || targetVolume;
+            var sessionPlan = this.POLARIZED.distributeWeeklyVolume(weekVolume, freq);
+            var trainingPaces = this.VDOT.getTrainingPaces(Math.round(vdot + w * 0.5));
+            var weekObj = { w: w + 1 };
+            var keys = Object.keys(sessionPlan).sort();
+            keys.forEach(function(key, idx) {
+                var s = sessionPlan[key];
+                var totalSec = Math.round((s.durationKm / 5.0) * 3600);
+                var blocks = [];
+                if (s.type === 'EASY' || s.type === 'RECOVERY') blocks = [{ m: 'jog', s: s.type === 'EASY' ? 'Zone 2 Duurloop' : 'Actief Herstel', t: totalSec }];
+                else if (s.type === 'LONG') blocks = [{ m: 'run', s: 'Lange Duurloop (Zone 2)', t: totalSec }];
+                else if (s.type === 'HIT') blocks = [{ m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: 'Interval', t: 60 }, { m: 'jog', s: 'Actief Herstel', t: 120 }, { m: 'sprint', s: 'Interval', t: 60 }, { m: 'jog', s: 'Actief Herstel', t: 120 }, { m: 'sprint', s: 'Interval', t: 60 }, { m: 'jog', s: 'Afkoelen', t: 120 }];
+                weekObj['t' + (idx + 1)] = { label: s.label, b: blocks };
+            });
+            plan.weeks.push(weekObj);
+        }
+        STATE.schemas['custom'] = plan;
+        LS.set('jellylegs_custom_plan', JSON.stringify(plan));
+        var ps = document.getElementById('plan-select');
+        ps.innerHTML = Object.keys(STATE.schemas).map(function(k) { return '<option value="' + k + '">' + STATE.schemas[k].name + '</option>'; }).join('');
+        ps.value = 'custom';
+        LS.set('strive_selected_plan', 'custom');
+        UI.renderPlan();
+        this.addDeletePlanButton();
+        UI.closeCustomPlanSheet(new Event('click'));
+        this.speak('AI Plan gegenereerd, pas je warmingup en cooldown aan in instellingen');
+    },
 
-        DB.getAll(function(runs) {
-            var acwrData = APP.ACWR.calculate(runs, ubv);
-            var chronicLoad = acwrData.chronicLoad;
-            var baselineRun = runs.slice().reverse().find(function(r) { return r.n.includes('Baseline') && r.pace; });
-            var vdot = 30; var baselinePace = 7.0;
-            if (baselineRun) { baselinePace = parseFloat(baselineRun.pace); vdot = APP.VDOT.fromPaceMinPerKm(baselinePace); }
-            var paces = APP.VDOT.getTrainingPaces(vdot);
-            var weeklyVolumes = APP.PERIODIZATION.generateWeeklyVolumes(chronicLoad, 8);
-            var cw = [];
-            for (var w = 0; w < weeklyVolumes.length; w++) {
-                var weekNum = w + 1; var weekVol = weeklyVolumes[w]; var wd = { w: weekNum };
-                var sessionPlan = APP.POLARIZED.distributeWeeklyVolume(weekVol, freq);
-                var sc = 1; var sessionKeys = Object.keys(sessionPlan).sort();
-                sessionKeys.forEach(function(key) {
-                    var session = sessionPlan[key];
-                    var sessionPace;
-                    if (session.type === 'HIT') sessionPace = paces.threshold.minPerKm;
-                    else if (session.type === 'LONG') sessionPace = paces.easy.minPerKm;
-                    else if (session.type === 'EASY') sessionPace = paces.easy.minPerKm + 0.5;
-                    else sessionPace = paces.easy.minPerKm + 1.0;
-                    var sessionMinutes = Math.round(session.durationKm * sessionPace);
-                    var blocks = APP._generateSessionBlocks(session.type, sessionMinutes, null, null, age);
-                    wd['t' + sc] = { label: session.label + ' (' + session.durationKm.toFixed(1) + 'km)', b: blocks };
-                    sc++;
-                });
-                cw.push(wd);
-            }
-            var cpd = { name: '🎯 AI Plan: ' + goal + ' (' + freq + 'x/week)', weeks: cw };
-            STATE.schemas['custom'] = cpd;
-            LS.set('jellylegs_custom_plan', JSON.stringify(cpd));
-            var ps = document.getElementById('plan-select');
-            if (!ps.querySelector('option[value="custom"]')) ps.innerHTML += '<option value="custom">' + cpd.name + '</option>';
-            ps.value = 'custom'; LS.set('strive_selected_plan', 'custom');
-            UI.renderPlan(); UI.closeCustomPlanSheet();
-            APP.speak('AI Plan gegenereerd op basis van jouw data.');
+    renderWeekTotal: function(runs) {
+        var wd = DB.processWeeklyData(runs);
+        var currentWeek = wd.length > 0 ? wd[0] : null;
+        if (currentWeek) {
+            document.getElementById('week-progress-current').innerText = currentWeek.totalDist.toFixed(1) + ' KM gelopen';
+            var cp = DB.getCustomPlan();
+            var target = cp ? cp.weeks[0].volume : 10;
+            document.getElementById('week-progress-target').innerText = 'Doel: ' + target.toFixed(1) + ' km';
+            document.getElementById('week-progress-fill').style.width = Math.min(100, (currentWeek.totalDist / target) * 100) + '%';
+        }
+    },
+
+    // ==============================================
+    // TRAINING SCHEMAS
+    // ==============================================
+    conditionPlan: {
+        name: '🏃 Conditie Opbouw',
+        weeks: [
+            { w: 1, t1: { label: 'Interval 60s', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 180 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust', t: 60 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust', t: 60 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 15min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 900 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 2, t1: { label: 'Interval 90s', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 180 }, { m: 'sprint', s: 'Loop 1:30', t: 90 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'sprint', s: 'Loop 1:30', t: 90 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'sprint', s: 'Loop 1:30', t: 90 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 18min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1080 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 3, t1: { label: 'Interval 60s (6x)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 180 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 45s', t: 45 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 45s', t: 45 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 45s', t: 45 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 45s', t: 45 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 45s', t: 45 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 45s', t: 45 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 20min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1200 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 4, t1: { label: 'Tempo (Taper)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Steady tempo', t: 600 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: 'Versnelling', t: 60 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 12min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 720 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 5, t1: { label: 'Interval 90s (5x)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: 'Loop 1:30', t: 90 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'sprint', s: 'Loop 1:30', t: 90 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'sprint', s: 'Loop 1:30', t: 90 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'sprint', s: 'Loop 1:30', t: 90 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'sprint', s: 'Loop 1:30', t: 90 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 22min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1320 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 6, t1: { label: 'Interval 60s (8x)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'sprint', s: 'Loop 1min', t: 60 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 25min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1500 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 7, t1: { label: 'Tempotraining', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustig tempo', t: 300 }, { m: 'run', s: 'Gematigd tempo', t: 300 }, { m: 'run', s: 'Steady tempo', t: 300 }, { m: 'run', s: 'Gematigd tempo', t: 300 }, { m: 'jog', s: 'Rustig joggen', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 25min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1500 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 8, t1: { label: 'Afsluiting (Taper)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 600 }, { m: 'sprint', s: 'Versnelling', t: 60 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 15min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 900 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } }
+        ]
+    },
+
+    plan5kBeginner: {
+        name: '🎯 5KM Beginner',
+        weeks: [
+            { w: 1, t1: { label: 'Start met 3x 3min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'run', s: 'Lopen 3min', t: 180 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'run', s: 'Lopen 3min', t: 180 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'run', s: 'Lopen 3min', t: 180 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 12min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 720 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 2, t1: { label: '4x 3min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'run', s: 'Lopen 3min', t: 180 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'run', s: 'Lopen 3min', t: 180 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'run', s: 'Lopen 3min', t: 180 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'run', s: 'Lopen 3min', t: 180 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 14min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 840 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 3, t1: { label: '3x 5min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'run', s: 'Lopen 5min', t: 300 }, { m: 'jog', s: 'Rust 2min', t: 120 }, { m: 'run', s: 'Lopen 5min', t: 300 }, { m: 'jog', s: 'Rust 2min', t: 120 }, { m: 'run', s: 'Lopen 5min', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 16min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 960 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 4, t1: { label: '4x 4min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'run', s: 'Lopen 4min', t: 240 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'run', s: 'Lopen 4min', t: 240 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'run', s: 'Lopen 4min', t: 240 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'run', s: 'Lopen 4min', t: 240 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 15min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 900 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 5, t1: { label: '2x 10min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'run', s: 'Lopen 10min', t: 600 }, { m: 'jog', s: 'Rust 2min', t: 120 }, { m: 'run', s: 'Lopen 10min', t: 600 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 18min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1080 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 6, t1: { label: '3x 6min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'run', s: 'Lopen 6min', t: 360 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'run', s: 'Lopen 6min', t: 360 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'run', s: 'Lopen 6min', t: 360 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 20min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1200 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 7, t1: { label: 'Interval 60s (8x)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: 'Snel 1min', t: 60 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'sprint', s: 'Snel 1min', t: 60 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'sprint', s: 'Snel 1min', t: 60 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'sprint', s: 'Snel 1min', t: 60 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'sprint', s: 'Snel 1min', t: 60 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'sprint', s: 'Snel 1min', t: 60 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'sprint', s: 'Snel 1min', t: 60 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 20min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1200 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 8, t1: { label: '5KM Probeersel', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'run', s: 'Lopen op eigen tempo', t: 1800 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 12min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 720 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } }
+        ]
+    },
+
+    plan5kErvaren: {
+        name: '🔥 5KM Ervaren',
+        weeks: [
+            { w: 1, t1: { label: 'Interval 400m', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: '400m tempo', t: 105 }, { m: 'jog', s: 'Rust 200m', t: 90 }, { m: 'sprint', s: '400m tempo', t: 105 }, { m: 'jog', s: 'Rust 200m', t: 90 }, { m: 'sprint', s: '400m tempo', t: 105 }, { m: 'jog', s: 'Rust 200m', t: 90 }, { m: 'sprint', s: '400m tempo', t: 105 }, { m: 'jog', s: 'Rust 200m', t: 90 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 25min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1500 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 2, t1: { label: 'Drempel 3x8min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Gematigd tempo', t: 480 }, { m: 'jog', s: 'Rust 2min', t: 120 }, { m: 'run', s: 'Gematigd tempo', t: 480 }, { m: 'jog', s: 'Rust 2min', t: 120 }, { m: 'run', s: 'Gematigd tempo', t: 480 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 28min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1680 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 3, t1: { label: 'Interval 800m', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: '800m tempo', t: 210 }, { m: 'jog', s: 'Rust 400m', t: 150 }, { m: 'sprint', s: '800m tempo', t: 210 }, { m: 'jog', s: 'Rust 400m', t: 150 }, { m: 'sprint', s: '800m tempo', t: 210 }, { m: 'jog', s: 'Rust 400m', t: 150 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 30min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1800 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 4, t1: { label: 'Herstel (Taper)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1200 }, { m: 'sprint', s: 'Versnelling', t: 45 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 15min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 900 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 5, t1: { label: 'Interval 400m (10x)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 30min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1800 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 6, t1: { label: 'Drempel 2x12min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Gematigd tempo', t: 720 }, { m: 'jog', s: 'Rust 2min', t: 120 }, { m: 'run', s: 'Gematigd tempo', t: 720 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 35min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 2100 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 7, t1: { label: 'Interval 1000m', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'sprint', s: '1km tempo', t: 270 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '1km tempo', t: 270 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '1km tempo', t: 270 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 30min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1800 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 8, t1: { label: '5KM Test', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: 'Versnelling', t: 30 }, { m: 'jog', s: 'Jog', t: 30 }, { m: 'sprint', s: 'Versnelling', t: 30 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'run', s: '5KM op wedstrijdtempo', t: 1800 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 12min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 720 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } }
+        ]
+    },
+
+    plan10k: {
+        name: '🎯 10KM',
+        weeks: [
+            { w: 1, t1: { label: 'Interval 400m', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: '400m tempo', t: 110 }, { m: 'jog', s: 'Rust 200m', t: 90 }, { m: 'sprint', s: '400m tempo', t: 110 }, { m: 'jog', s: 'Rust 200m', t: 90 }, { m: 'sprint', s: '400m tempo', t: 110 }, { m: 'jog', s: 'Rust 200m', t: 90 }, { m: 'sprint', s: '400m tempo', t: 110 }, { m: 'jog', s: 'Rust 200m', t: 90 }, { m: 'sprint', s: '400m tempo', t: 110 }, { m: 'jog', s: 'Rust 200m', t: 90 }, { m: 'sprint', s: '400m tempo', t: 110 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 30min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1800 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 2, t1: { label: 'Drempel 4x6min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Gematigd tempo', t: 360 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'run', s: 'Gematigd tempo', t: 360 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'run', s: 'Gematigd tempo', t: 360 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'run', s: 'Gematigd tempo', t: 360 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 35min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 2100 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 3, t1: { label: 'Interval 800m', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: '800m tempo', t: 220 }, { m: 'jog', s: 'Rust 400m', t: 150 }, { m: 'sprint', s: '800m tempo', t: 220 }, { m: 'jog', s: 'Rust 400m', t: 150 }, { m: 'sprint', s: '800m tempo', t: 220 }, { m: 'jog', s: 'Rust 400m', t: 150 }, { m: 'sprint', s: '800m tempo', t: 220 }, { m: 'jog', s: 'Rust 400m', t: 150 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 40min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 2400 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 4, t1: { label: 'Herstel (Taper)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1500 }, { m: 'sprint', s: 'Versnelling', t: 60 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 20min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1200 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 5, t1: { label: 'Interval 400m (12x)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: '400m tempo', t: 103 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 103 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 103 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 103 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 103 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 103 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 103 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 103 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 103 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 40min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 2400 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 6, t1: { label: 'Drempel 20min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'run', s: 'Gematigd tempo', t: 1200 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 45min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 2700 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 7, t1: { label: 'Interval 1000m (4x)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'sprint', s: '1km tempo', t: 280 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '1km tempo', t: 280 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '1km tempo', t: 280 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '1km tempo', t: 280 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 40min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 2400 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 8, t1: { label: '10KM Test', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'run', s: '10KM op wedstrijdtempo', t: 3600 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 15min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 900 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } }
+        ]
+    },
+
+    planHalfMarathon: {
+        name: '🏅 Halve Marathon',
+        weeks: [
+            { w: 1, t1: { label: 'Interval 800m', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: '800m tempo', t: 230 }, { m: 'jog', s: 'Rust 400m', t: 150 }, { m: 'sprint', s: '800m tempo', t: 230 }, { m: 'jog', s: 'Rust 400m', t: 150 }, { m: 'sprint', s: '800m tempo', t: 230 }, { m: 'jog', s: 'Rust 400m', t: 150 }, { m: 'sprint', s: '800m tempo', t: 230 }, { m: 'jog', s: 'Rust 400m', t: 150 }, { m: 'sprint', s: '800m tempo', t: 230 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 35min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 2100 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 2, t1: { label: 'Drempel 20min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Gematigd tempo', t: 1200 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 40min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 2400 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 3, t1: { label: 'Interval 1000m', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'sprint', s: '1km tempo', t: 290 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '1km tempo', t: 290 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '1km tempo', t: 290 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '1km tempo', t: 290 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '1km tempo', t: 290 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 45min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 2700 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 4, t1: { label: 'Herstel (Taper)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1800 }, { m: 'sprint', s: 'Versnelling', t: 60 }, { m: 'jog', s: 'Rust 1min', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 20min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 1200 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 5, t1: { label: 'Drempel 25min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Gematigd tempo', t: 1500 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 50min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 3000 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 6, t1: { label: 'Interval 400m (10x)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'sprint', s: '400m tempo', t: 100 }, { m: 'jog', s: 'Rust 400m', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 50min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 3000 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 7, t1: { label: 'Drempel 3x10min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Gematigd tempo', t: 600 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'run', s: 'Gematigd tempo', t: 600 }, { m: 'jog', s: 'Rust 1:30', t: 90 }, { m: 'run', s: 'Gematigd tempo', t: 600 }, { m: 'jog', s: 'Jog', t: 60 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 45min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 2700 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } },
+            { w: 8, t1: { label: 'Halve Marathon Test', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'run', s: 'Op wedstrijdtempo', t: 5400 }, { m: 'jog', s: 'Jog', t: 120 }, { m: 'warmup', s: 'Cool-down', t: 300 }] },
+                t2: { label: 'Duurloop 15min', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Rustige duurloop', t: 900 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } }
+        ]
+    },
+
+    // ==============================================
+    // Run History
+    // ==============================================
+    viewRun: function(id) {
+        DB.get(id, function(data) {
+            if (!data) return;
+            STATE.viewedRoute = data.route || [];
+            document.getElementById('res-d').innerText = data.dist;
+            document.getElementById('res-p').innerText = data.pace || '0.00';
+            document.getElementById('res-time').innerText = APP.formatT(data.duration || 0);
+            document.getElementById('res-cal').innerText = data.calories || 0;
+            var ss = parseFloat(data.sprintTime) || 0;
+            var rs = parseFloat(data.runTime) || 0;
+            var js = parseFloat(data.jogTime) || 0;
+            var ws = parseFloat(data.walkTime) || 0;
+            var tc = ss + rs + js + ws;
+            var sp = tc > 0 ? Math.round(ss / tc * 100) : 0;
+            var rp = tc > 0 ? Math.round(rs / tc * 100) : 0;
+            var jp = tc > 0 ? Math.round(js / tc * 100) : 0;
+            var wp = tc > 0 ? Math.max(0, 100 - sp - rp - jp) : 0;
+            document.getElementById('stat-sprint-percent').innerText = sp + '%'; document.getElementById('stat-run-percent').innerText = rp + '%';
+            document.getElementById('stat-jog-percent').innerText = jp + '%'; document.getElementById('stat-walk-percent').innerText = wp + '%';
+            document.getElementById('stat-sprint-bar').style.width = sp + '%'; document.getElementById('stat-run-bar').style.width = rp + '%';
+            document.getElementById('stat-jog-bar').style.width = jp + '%'; document.getElementById('stat-walk-bar').style.width = wp + '%';
+            document.getElementById('stat-sprint-time').innerText = APP.formatT(ss); document.getElementById('stat-run-time').innerText = APP.formatT(rs);
+            document.getElementById('stat-jog-time').innerText = APP.formatT(js); document.getElementById('stat-walk-time').innerText = APP.formatT(ws);
+            UI.renderResultMap(data.route || []);
+            UI.renderPaceChart(data.paceData || []);
+            UI.openResultScreen();
         });
     },
 
-    connectHeartRateMonitor: async function() {
-        try {
-            if (!navigator.bluetooth) { alert('Bluetooth wordt niet ondersteund in deze browser'); return; }
-            this.vibrate([100, 50, 100]);
-            STATE.heartRateDevice = await navigator.bluetooth.requestDevice({ filters: [{ services: ['heart_rate'] }], optionalServices: ['battery_service'] });
-            var server = await STATE.heartRateDevice.gatt.connect();
-            var service = await server.getPrimaryService('heart_rate');
-            STATE.heartRateCharacteristic = await service.getCharacteristic('heart_rate_measurement');
-            await STATE.heartRateCharacteristic.startNotifications();
-            var age = parseInt(LS.get('user_age', '30'));
-            var zones = APP.POLARIZED.getHeartRateZones(age);
-            STATE.heartRateCharacteristic.addEventListener('characteristicvaluechanged', function(e) {
-                var v = e.target.value, f = v.getUint8(0), r = f & 0x1 ? v.getUint16(1, true) : v.getUint8(1);
-                STATE.currentHeartRate = r;
-                if (r >= zones.zone4.low) APP.speak('Je hartslag is ' + r + ', maximaal! Let op je ademhaling.');
-                else if (r >= zones.zone3.low) APP.speak('Goed bezig! Hartslag ' + r + ', drempel zone. Focus op tempo.');
-                else if (r >= zones.zone2.low) APP.speak('Prima tempo, hartslag ' + r + ' in aerobe zone.');
-            });
-            this.speak('Hartslagmeter verbonden! Jouw max hartslag: ongeveer ' + zones.hrMax + ' bpm.');
-        } catch (err) { console.warn('Hartslagmeter fout:', err); this.speak('Kon geen verbinding maken met de hartslagmeter'); }
+    shareResult: function() {
+        if (navigator.share) navigator.share({ title: 'Mijn hardloopsessie', text: 'Zojuist ' + document.getElementById('res-d').innerText + ' km gelopen!' }).catch(function(e) {});
+        else APP.speak('Delen niet beschikbaar');
     },
 
-    shareResult: async function() {
-        if (!navigator.share) { alert('Delen wordt niet ondersteund'); return; }
-        try { await navigator.share({ title: '🏃 Mijn RunFlow run!', text: 'Ik heb net ' + document.getElementById('res-d').innerText + ' km gerund in ' + document.getElementById('res-time').innerText + '! Gemiddeld tempo: ' + document.getElementById('res-p').innerText + ' min/km', url: window.location.href }); } catch (e) {}
-    },
-
-    generateShareImage: async function() {
-        try {
-            document.getElementById('res-btn').innerText = 'GENEREREN...';
-            var canvas = document.createElement('canvas'); canvas.width = 1080; canvas.height = 1080;
-            var ctx = canvas.getContext('2d');
-            var grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-            grad.addColorStop(0, '#ff6b00'); grad.addColorStop(1, '#ff8e3c');
-            ctx.fillStyle = grad; ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            ctx.font = '900 60px Inter, sans-serif'; ctx.fillStyle = '#ffffff'; ctx.textAlign = 'left'; ctx.fillText('RUNFLOW', 60, 90);
-            ctx.font = '700 24px Inter, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.textAlign = 'right';
-            ctx.fillText(new Date().toLocaleDateString('nl-NL', { day: '2-digit', month: 'long', year: 'numeric' }).toUpperCase(), canvas.width - 60, 85);
-
-            var mY = 160, mH = 600, mW = 960, mX = 60;
-            ctx.save();
-            ctx.beginPath(); ctx.roundRect(mX, mY, mW, mH, 30); ctx.clip();
-            ctx.fillStyle = '#f2f2f7'; ctx.fill();
-
-            var shareRoute = (STATE.viewedRoute && STATE.viewedRoute.length >= 2) ? STATE.viewedRoute : STATE.currentRoute;
-            if (shareRoute && shareRoute.length >= 2) {
-                var minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
-                shareRoute.forEach(function(p) { if (p[0] < minLat) minLat = p[0]; if (p[0] > maxLat) maxLat = p[0]; if (p[1] < minLng) minLng = p[1]; if (p[1] > maxLng) maxLng = p[1]; });
-                var cLat = (minLat + maxLat) / 2, cLng = (minLng + maxLng) / 2;
-                var merY = function(lat) { var lr = lat * Math.PI / 180; return (1 - Math.log(Math.tan(lr) + 1 / Math.cos(lr)) / Math.PI) / 2; };
-                var merX = function(lng) { return (lng + 180) / 360; };
-                var zoom = 18;
-                while (zoom > 10) {
-                    if ((merX(maxLng) - merX(minLng)) * Math.pow(2, zoom) * 256 < mW - 100 && (merY(minLat) - merY(maxLat)) * Math.pow(2, zoom) * 256 < mH - 100) break;
-                    zoom--;
-                }
-                var cx = merX(cLng) * Math.pow(2, zoom), cy = merY(cLat) * Math.pow(2, zoom);
-                var sx = Math.floor(cx - (mW / 2 / 256)) - 1, ex = Math.floor(cx + (mW / 2 / 256)) + 1;
-                var sy = Math.floor(cy - (mH / 2 / 256)) - 1, ey = Math.floor(cy + (mH / 2 / 256)) + 1;
-                var ccx = mX + mW / 2, ccy = mY + mH / 2;
-                var tiles = [];
-                for (var tx = sx; tx <= ex; tx++) { for (var ty = sy; ty <= ey; ty++) { tiles.push({ x: tx, y: ty, z: zoom }); } }
-                await Promise.all(tiles.map(function(t) {
-                    return new Promise(function(resolve) {
-                        var img = new Image(); img.crossOrigin = 'Anonymous';
-                        img.onload = function() { ctx.drawImage(img, ccx + (t.x - cx) * 256, ccy + (t.y - cy) * 256, 256, 256); resolve(); };
-                        img.onerror = function() { resolve(); };
-                        img.src = 'https://a.tile.openstreetmap.org/' + t.z + '/' + t.x + '/' + t.y + '.png';
-                    });
-                }));
-                var pts = shareRoute.map(function(p) { return { x: ccx + (merX(p[1]) * Math.pow(2, zoom) - cx) * 256, y: ccy + (merY(p[0]) * Math.pow(2, zoom) - cy) * 256 }; });
-                ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-                for (var i = 0; i < pts.length - 1; i++) {
-                    var pace = shareRoute[i + 1][2] || shareRoute[i][2] || 0;
-                    var col = pace === 0 || pace >= 9.0 ? '#f39c12' : pace >= 6.5 ? '#0a84ff' : '#ff6b00';
-                    ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y); ctx.lineTo(pts[i + 1].x, pts[i + 1].y); ctx.strokeStyle = col; ctx.stroke();
-                }
-            } else {
-                ctx.font = '500 30px Inter, sans-serif'; ctx.fillStyle = '#8e8e93'; ctx.textAlign = 'center';
-                ctx.fillText('GEEN ROUTE DATA BESCHIKBAAR', mX + mW / 2, mY + mH / 2);
-            }
-            ctx.restore();
-
-            var sy2 = 820, cw2 = canvas.width / 4;
-            var ds = function(x, icon, val, unit, color) {
-                ctx.textAlign = 'center';
-                ctx.font = '50px Inter, sans-serif'; ctx.fillText(icon, x, sy2);
-                ctx.font = '900 80px Inter, sans-serif'; ctx.fillStyle = color || '#ffffff'; ctx.fillText(val, x, sy2 + 90);
-                ctx.font = '700 24px Inter, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.fillText(unit.toUpperCase(), x, sy2 + 130);
-            };
-            ds(cw2 * 0.5, '📍', document.getElementById('res-d').innerText, 'KM', '#ffffff');
-            ds(cw2 * 1.5, '⏱️', document.getElementById('res-time').innerText, 'TIJD', '#ffffff');
-            ds(cw2 * 2.5, '⚡', document.getElementById('res-p').innerText, 'MIN/KM', '#ffffff');
-            ds(cw2 * 3.5, '🔥', document.getElementById('res-cal').innerText, 'KCAL', '#ffffff');
-            ctx.font = '600 22px Inter, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.textAlign = 'center';
-            ctx.fillText('RUNFLOW.APP', canvas.width / 2, canvas.height - 40);
-            var link = document.createElement('a');
-            link.download = 'runflow-run-' + new Date().toISOString().split('T')[0] + '.png';
-            link.href = canvas.toDataURL('image/png'); link.click();
-            document.getElementById('res-btn').innerText = 'OPSLAAN IN LOGBOEK';
-            this.vibrate([100, 50, 100]); this.speak('Poster succesvol gegenereerd!');
-        } catch (err) { alert('Kon geen afbeelding genereren.'); document.getElementById('res-btn').innerText = 'OPSLAAN IN LOGBOEK'; }
+    generateShareImage: function() {
+        var src = document.getElementById('map');
+        var canvas = document.createElement('canvas'); canvas.width = 800; canvas.height = 800;
+        var ctx = canvas.getContext('2d');
+        var mapImg = new Image();
+        var gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, '#1c1c1e'); gradient.addColorStop(1, '#2c2c2e');
+        ctx.fillStyle = gradient; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'white'; ctx.font = 'bold 48px Inter, sans-serif'; ctx.fillText('JellyLegs', 40, 100);
+        ctx.fillStyle = '#ff6b00'; ctx.font = 'bold 24px Inter, sans-serif'; ctx.fillText('🏃‍♂️ ' + document.getElementById('res-d').innerText + ' km', 40, 170);
+        ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '18px Inter, sans-serif'; ctx.fillText('⏱ ' + document.getElementById('res-time').innerText, 40, 220);
+        ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '18px Inter, sans-serif'; ctx.fillText('🔥 ' + document.getElementById('res-cal').innerText + ' kcal', 40, 260);
+        // Try to render route on share image
+        var route = STATE.viewedRoute || STATE.currentRoute || [];
+        if (route.length >= 2) {
+            ctx.strokeStyle = '#ff6b00'; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            var minLat = Math.min.apply(null, route.map(function(p) { return p[0]; })), maxLat = Math.max.apply(null, route.map(function(p) { return p[0]; }));
+            var minLng = Math.min.apply(null, route.map(function(p) { return p[1]; })), maxLng = Math.max.apply(null, route.map(function(p) { return p[1]; }));
+            var lr = maxLat - minLat || 0.001; var lnr = maxLng - minLng || 0.001;
+            ctx.beginPath(); route.forEach(function(p, i) { var x = ((p[1] - minLng) / lnr) * 600 + 100; var y = ((maxLat - p[0]) / lr) * 400 + 350; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }); ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = '14px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('JellyLegs - Powered by AI', canvas.width / 2, 760);
+        var link = document.createElement('a'); link.download = 'jellylegs-run.png'; link.href = canvas.toDataURL(); link.click();
     },
 
     exportAsGPX: function() {
-        var gpxRoute = (STATE.viewedRoute && STATE.viewedRoute.length >= 2) ? STATE.viewedRoute : STATE.currentRoute;
-        if (!gpxRoute || gpxRoute.length < 2) { alert('GEEN GPS DATA AANWEZIG'); return; }
-        var gpx = '<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="RunFlow App">\n  <trk>\n    <name>' + document.getElementById('res-title').innerText + '</name>\n    <trkseg>\n';
-        gpxRoute.forEach(function(p) { gpx += '      <trkpt lat="' + p[0] + '" lon="' + p[1] + '"></trkpt>\n'; });
-        gpx += '    </trkseg>\n  </trk>\n</gpx>';
-        var blob = new Blob([gpx], { type: 'application/gpx+xml' }), url = URL.createObjectURL(blob), a = document.createElement('a');
-        a.href = url; a.download = 'runflow-' + new Date().toISOString().split('T')[0] + '.gpx'; a.click(); URL.revokeObjectURL(url);
+        var route = STATE.viewedRoute || STATE.currentRoute || [];
+        if (route.length === 0) { APP.speak('Geen route data beschikbaar'); return; }
+        var gpx = '<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>';
+        route.forEach(function(p) { gpx += '<trkpt lat="' + p[0] + '" lon="' + p[1] + '"></trkpt>'; });
+        gpx += '</trkseg></trk></gpx>';
+        var blob = new Blob([gpx], { type: 'application/gpx+xml' });
+        var link = document.createElement('a'); link.download = 'jellylegs-route.gpx'; link.href = URL.createObjectURL(blob); link.click();
+        URL.revokeObjectURL(link.href);
     },
 
     exportAsCSV: function() {
         DB.getAll(function(runs) {
-            if (!runs || runs.length === 0) { alert('GEEN DATA'); return; }
-            var csv = '\uFEFFDatum,Sessie,Afstand (km),Tijd (min),Pace (min/km),Calorieën\n';
-            runs.forEach(function(r) { csv += (r.d || '') + ',' + ((r.n || '').replace(/,/g, ' ')) + ',' + (r.dist || '0') + ',' + Math.round((r.duration || 0) / 60) + ',' + (r.pace || '0') + ',' + (r.calories || '0') + '\n'; });
-            var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }), url = URL.createObjectURL(blob), a = document.createElement('a');
-            a.href = url; a.download = 'runflow-' + new Date().toISOString().split('T')[0] + '.csv'; a.click(); URL.revokeObjectURL(url);
+            if (runs.length === 0) { APP.speak('Geen data om te exporteren'); return; }
+            var csv = 'Datum,Tijd,Afstand (km),Duur (s),Pace (min/km),Calorieën,SprintTijd,RunTijd,JogTijd,WalkTijd\n';
+            runs.forEach(function(r) { csv += [r.d, r.t || '', r.dist, r.duration || 0, r.pace || 0, r.calories || 0, r.sprintTime || 0, r.runTime || 0, r.jogTime || 0, r.walkTime || 0].join(',') + '\n'; });
+            var blob = new Blob([csv], { type: 'text/csv' });
+            var link = document.createElement('a'); link.download = 'jellylegs-export.csv'; link.href = URL.createObjectURL(blob); link.click();
+            URL.revokeObjectURL(link.href);
         });
     },
 
     exportAllAsJSON: function() {
         DB.getAll(function(runs) {
-            if (!runs || runs.length === 0) { alert('GEEN DATA'); return; }
-            var blob = new Blob([JSON.stringify(runs, null, 2)], { type: 'application/json' }), url = URL.createObjectURL(blob), a = document.createElement('a');
-            a.href = url; a.download = 'runflow-' + new Date().toISOString().split('T')[0] + '.json'; a.click(); URL.revokeObjectURL(url);
+            if (runs.length === 0) { APP.speak('Geen data om te exporteren'); return; }
+            var json = JSON.stringify(runs, null, 2);
+            var blob = new Blob([json], { type: 'application/json' });
+            var link = document.createElement('a'); link.download = 'jellylegs-backup.json'; link.href = URL.createObjectURL(blob); link.click();
+            URL.revokeObjectURL(link.href);
         });
+    },
+
+    connectHeartRateMonitor: function() {
+        if (!navigator.bluetooth) { APP.speak('Bluetooth niet beschikbaar'); return; }
+        APP.speak('Zoeken naar hartslagmeter...');
+        navigator.bluetooth.requestDevice({ filters: [{ services: ['heart_rate'] }] }).then(function(device) {
+            STATE.heartRateDevice = device;
+            return device.gatt.connect();
+        }).then(function(server) { return server.getPrimaryService('heart_rate'); }).then(function(service) {
+            return service.getCharacteristic('heart_rate_measurement');
+        }).then(function(characteristic) {
+            STATE.heartRateCharacteristic = characteristic;
+            characteristic.addEventListener('characteristicvaluechanged', function(event) {
+                var value = event.target.value;
+                var flags = value.getUint8(0);
+                var hr16Bit = flags & 0x1;
+                STATE.currentHeartRate = hr16Bit ? value.getUint16(1, true) : value.getUint8(1);
+                var display = document.getElementById('hr-zones-display');
+                if (display) {
+                    var age = parseInt(LS.get('user_age', '30'));
+                    var zones = APP.POLARIZED.getHeartRateZones(age);
+                    var zone = STATE.currentHeartRate <= zones.zone1.high ? 'Z1' : STATE.currentHeartRate <= zones.zone2.high ? 'Z2' : STATE.currentHeartRate <= zones.zone3.high ? 'Z3' : 'Z4';
+                    display.innerHTML = '<div style="font-size: 32px; font-weight: 900; color: var(--danger); text-align: center; margin-bottom: 8px;">❤️ ' + STATE.currentHeartRate + ' bpm</div><div style="font-size: 13px; font-weight: 800; color: var(--primary); margin-bottom: 10px;">Max HR: ~' + zones.hrMax + ' bpm | Zone: ' + zone + '</div><div style="display: flex; flex-direction: column; gap: 5px;">' + Object.keys(zones).filter(function(k) { return k.startsWith('zone'); }).map(function(k) { return '<div style="display: flex; justify-content: space-between; font-size:12px;"><span style="font-weight:700; color:' + (zone === k.toUpperCase() ? 'var(--danger)' : 'var(--text-muted)') + ';">' + k.toUpperCase() + '</span><span>' + zones[k].low + '-' + zones[k].high + ' bpm</span></div>'; }).join('') + '</div>';
+                }
+            });
+            return characteristic.startNotifications();
+        }).then(function() {
+            APP.speak('Hartslagmeter gekoppeld!');
+        }).catch(function(err) {
+            console.warn('Bluetooth fout:', err);
+            APP.speak('Koppelen mislukt. Probeer opnieuw.');
+        });
+    },
+
+    closeApp: function() {
+        if ('onbeforeunload' in window) window.close();
+        else APP.speak('Sluit het tabblad om de app te verlaten');
     }
 };
 
 // ==============================================
-// SCHEMAS (training plans)
+// SCHEMA INITIALIZATION
 // ==============================================
-(function() {
-    var s = {
-        conditie: { name: 'Basis Conditie (0-3km)', weeks: [
-            { w: 1, t1: { label: 'W1: Eerste Stap', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 60, s: 'Hardlopen', m: 'run' }, { t: 90, s: 'Wandelen', m: 'walk' }, { t: 60, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W1: Ritme Vinden', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 120, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Wandelen', m: 'walk' }, { t: 120, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 2, t1: { label: 'W2: De 3-Minuten', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W2: Uithouding', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 3, t1: { label: 'W3: Verlengen', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 420, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 420, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W3: Stabiel Tempo', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 4, t1: { label: 'W4: De Helft', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 720, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 720, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W4: Constante Run', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 5, t1: { label: 'W5: Kracht Opbouw', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 480, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Wandelen', m: 'walk' }, { t: 480, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Wandelen', m: 'walk' }, { t: 480, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W5: De 20 Minuten', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 6, t1: { label: 'W6: Lange Intervallen', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Wandelen', m: 'walk' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Wandelen', m: 'walk' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W6: Focus Run', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1500, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 7, t1: { label: 'W7: Laatste Loodjes', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Wandelen', m: 'walk' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W7: Grens Verleggen', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1800, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 8, t1: { label: 'W8: Activatie', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: '🏁 DE 3KM FINISH', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 2100, s: '3KM POGING', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } }
-        ]},
-        gevorderd5k: { name: 'Beginner 5KM Plan', weeks: [
-            { w: 1, t1: { label: 'W1: Start-Stop', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W1: Opbouw', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 180, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 2, t1: { label: 'W2: 4/2 Interval', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W2: Opbouw', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 3, t1: { label: 'W3: 5/3 Interval', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W3: Opbouw', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 4, t1: { label: 'W4: 7/3 Interval', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 420, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 420, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 420, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 420, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W4: Opbouw', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 420, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 420, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 420, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 420, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 420, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 5, t1: { label: 'W5: 10/3 Interval', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W5: Opbouw', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 6, t1: { label: 'W6: 15/2 Interval', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W6: Opbouw', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 7, t1: { label: 'W7: 25 Minuten Continuous', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1500, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W7: 30 Minuten Continuous', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1800, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 8, t1: { label: 'W8: Tapering', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: '🏁 DE 5KM FINISH', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 2100, s: '5KM POGING', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } }
-        ]},
-        gevorderd5k_ervaren: { name: 'Ervaren Loper 5KM Plan (Snelheid)', weeks: [
-            { w: 1, t1: { label: 'W1: Tempo Blokken', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Joggen', m: 'jog' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W1: Lange Duurloop', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 2400, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 2, t1: { label: 'W2: 1km Intervallen', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Joggen', m: 'jog' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Joggen', m: 'jog' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W2: Hardlopen', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 2700, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 3, t1: { label: 'W3: Drempel Training', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Joggen', m: 'jog' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W3: Lange Run', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 3000, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 4, t1: { label: 'W4: 800m Herhalingen', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Joggen', m: 'jog' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Joggen', m: 'jog' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 240, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W4: Hardlopen 35m', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 2100, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 5, t1: { label: 'W5: 1km Tempo', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 90, s: 'Joggen', m: 'jog' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 90, s: 'Joggen', m: 'jog' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 90, s: 'Joggen', m: 'jog' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W5: Lange Run', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 3300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 6, t1: { label: 'W6: Drempel Blokken', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Joggen', m: 'jog' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Joggen', m: 'jog' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W6: Hardlopen 40m', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 2400, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 7, t1: { label: 'W7: Tapering', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Joggen', m: 'jog' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W7: Activatie', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Sprint', m: 'sprint' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 8, t1: { label: 'W8: Race Week', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Sprint', m: 'sprint' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: '🏁 5KM RACE POGING', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1800, s: '5KM MAX TEMPO', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } }
-        ]},
-        intervallen10k: { name: '10KM Interval Focus', weeks: [
-            { w: 1, t1: { label: 'W1: Basis Interval', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W1: Duurloop 40m', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 2400, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 2, t1: { label: 'W2: Kracht', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W2: Duurloop 45m', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 2700, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 3, t1: { label: 'W3: Snelheid 400s', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 120, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Wandelen', m: 'walk' }, { t: 120, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Wandelen', m: 'walk' }, { t: 120, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W3: Duurloop 50m', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 3000, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 4, t1: { label: 'W4: Drempel Run', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1500, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W4: Herstel 30m', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1800, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 5, t1: { label: 'W5: Lange Intervallen', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 180, s: 'Wandelen', m: 'walk' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W5: Duurloop 55m', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 3300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 6, t1: { label: 'W6: 1km Herhalingen', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W6: Duurloop 60m', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 3600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 7, t1: { label: 'W7: Tempo Wissel', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W7: Pre-10K Run', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 2400, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 8, t1: { label: 'W8: Activatie', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 900, s: 'Joggen', m: 'jog' }, { t: 60, s: 'Sprint', m: 'sprint' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: '🏁 DE 10KM TEST', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 3600, s: '10KM POGING', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } }
-        ]},
-        halveMarathon: { name: 'Halve Marathon (21.1km)', weeks: [
-            { w: 1, t1: { label: 'W1: Basis Opbouw', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W1: Lange Duurloop', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 3600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 2, t1: { label: 'W2: Tempo Intervallen', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 900, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W2: 8km Run', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 4200, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 3, t1: { label: 'W3: Lange Intervallen', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W3: 10km Hardloop Test', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 4800, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 4, t1: { label: 'W4: Drempel Training', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1800, s: 'Hardlopen', m: 'run' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W4: 12km Hardlopen', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 5400, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 5, t1: { label: 'W5: Snelheid Werk', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 60, s: 'Wandelen', m: 'walk' }, { t: 300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W5: 14km Duurloop', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 6300, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 6, t1: { label: 'W6: Tempo Blokken', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 90, s: 'Wandelen', m: 'walk' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 90, s: 'Wandelen', m: 'walk' }, { t: 1200, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W6: 16km Duurloop', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 7200, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 7, t1: { label: 'W7: Tapering', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 900, s: 'Joggen', m: 'jog' }, { t: 120, s: 'Wandelen', m: 'walk' }, { t: 600, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: 'W7: 12km Test', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 5400, s: 'Hardlopen', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } },
-            { w: 8, t1: { label: 'W8: Activatie', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 600, s: 'Joggen', m: 'jog' }, { t: 30, s: 'Sprint', m: 'sprint' }, { t: 300, s: 'Cool-down', m: 'warmup' }] }, t2: { label: '🏁 HALVE MARATHON', b: [{ t: 300, s: 'Warming-up', m: 'warmup' }, { t: 8400, s: '21.1KM POGING', m: 'run' }, { t: 300, s: 'Cool-down', m: 'warmup' }] } }
-        ]}
-    };
-    STATE.schemas = s;
+STATE.schemas['condition'] = APP.conditionPlan;
+STATE.schemas['5k-beginner'] = APP.plan5kBeginner;
+STATE.schemas['5k-experienced'] = APP.plan5kErvaren;
+STATE.schemas['10k'] = APP.plan10k;
+STATE.schemas['half-marathon'] = APP.planHalfMarathon;
+
+// ==============================================
+// WEBGL SHADER BACKGROUND ANIMATION
+// ==============================================
+(function initShader() {
+    var canvas = document.getElementById('shader-canvas');
+    if (!canvas) return;
+    var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) return;
+
+    function resizeShaderCanvas() {
+        var displayWidth = canvas.clientWidth;
+        var displayHeight = canvas.clientHeight;
+        if (canvas.width !== displayWidth * window.devicePixelRatio || canvas.height !== displayHeight * window.devicePixelRatio) {
+            canvas.width = displayWidth * window.devicePixelRatio;
+            canvas.height = displayHeight * window.devicePixelRatio;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+    }
+
+    var vsSource = [
+        'attribute vec2 position;',
+        'varying vec2 vUv;',
+        'void main() {',
+        '  vUv = position * 0.5 + 0.5;',
+        '  gl_Position = vec4(position, 0.0, 1.0);',
+        '}'
+    ].join('\n');
+
+    var fsSource = [
+        'precision highp float;',
+        'varying vec2 vUv;',
+        'uniform float uTime;',
+        'uniform float uLight;',
+        'void main() {',
+        '  vec2 uv = vUv;',
+        '  float wave1 = sin(uv.x * 5.0 + uTime * 0.4) * cos(uv.y * 4.0 + uTime * 0.25);',
+        '  float wave2 = cos(uv.y * 6.0 - uTime * 0.35) * sin(uv.x * 3.0 + uTime * 0.5);',
+        '  float wave3 = sin((uv.x + uv.y) * 3.5 + uTime * 0.45) * 0.5;',
+        '  float combined = wave1 * 0.4 + wave2 * 0.35 + wave3 * 0.25;',
+        '  combined = combined * 0.5 + 0.5;',
+        '  vec3 darkColor = vec3(0.25, 0.18, 0.08);',
+        '  vec3 midColor = vec3(0.65, 0.55, 0.25);',
+        '  vec3 lightColor = vec3(0.95, 0.85, 0.55);',
+        '  vec3 col1 = mix(darkColor, midColor, combined);',
+        '  vec3 col2 = mix(midColor, lightColor, combined * 0.8);',
+        '  float blend = sin(uv.x * 2.0 + uv.y * 1.5 + uTime * 0.1) * 0.5 + 0.5;',
+        '  vec3 finalColor = mix(col1, col2, blend);',
+        '  float vignette = 1.0 - length(uv - 0.5) * 0.8;',
+        '  finalColor *= mix(0.7, 1.0, uLight);',
+        '  finalColor *= vignette;',
+        '  gl_FragColor = vec4(finalColor, 1.0);',
+        '}'
+    ].join('\n');
+
+    function createShader(type, source) {
+        var s = gl.createShader(type);
+        gl.shaderSource(s, source);
+        gl.compileShader(s);
+        if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+            console.warn('Shader compile error:', gl.getShaderInfoLog(s));
+            gl.deleteShader(s);
+            return null;
+        }
+        return s;
+    }
+
+    var vs = createShader(gl.VERTEX_SHADER, vsSource);
+    var fs = createShader(gl.FRAGMENT_SHADER, fsSource);
+    if (!vs || !fs) return;
+
+    var program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.warn('Shader link error');
+        return;
+    }
+
+    var positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+
+    var posLoc = gl.getAttribLocation(program, 'position');
+    var timeLoc = gl.getUniformLocation(program, 'uTime');
+    var lightLoc = gl.getUniformLocation(program, 'uLight');
+
+    resizeShaderCanvas();
+    window.addEventListener('resize', resizeShaderCanvas);
+
+    // Detect theme changes to adjust brightness
+    function getLightValue() {
+        return document.body.classList.contains('light-mode') ? 0.0 : 1.0;
+    }
+
+    function getClearColor() {
+        return document.body.classList.contains('light-mode') ? [0.95, 0.93, 0.90, 1] : [0, 0, 0, 1];
+    }
+
+    // In light mode, skip drawing the shader entirely - only clear to warm white
+    function shaderLoop(time) {
+        time *= 0.002;
+        resizeShaderCanvas();
+        var cc = getClearColor();
+        gl.clearColor(cc[0], cc[1], cc[2], cc[3]);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        var isLight = document.body.classList.contains('light-mode');
+        if (!isLight) {
+            gl.useProgram(program);
+            gl.enableVertexAttribArray(posLoc);
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+            gl.uniform1f(timeLoc, time);
+            gl.uniform1f(lightLoc, getLightValue());
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+        requestAnimationFrame(shaderLoop);
+    }
+    requestAnimationFrame(shaderLoop);
 })();
 
+// ==============================================
 // BOOTSTRAP
+// ==============================================
 document.addEventListener('DOMContentLoaded', function() {
     DB.init(function() { APP.init(); });
 });
