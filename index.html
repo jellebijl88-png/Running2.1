@@ -16,6 +16,9 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="light-mode"> <div id="app-container">
+    <!-- WebGL Shader Canvas (achtergrond animatie) -->
+    <canvas id="shader-canvas"></canvas>
+    <div class="shader-overlay"></div>
 
     <div id="onboarding-screen">
         <div id="onboard-step-1" class="onboarding-step active">
@@ -371,6 +374,13 @@
     <div id="timer-display">
         <h2 style="text-align:center; margin-bottom:8px;">Active Tracker</h2>
         <div id="live-training-map"></div>
+        
+        <!-- GPS Status Indicator -->
+        <div id="gps-status" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:6px 12px; margin:4px auto 0; background:var(--bg-secondary); border-radius:100px; width:fit-content; font-size:11px; font-weight:700;">
+            <span id="gps-dot" style="width:8px; height:8px; border-radius:50%; background:var(--text-muted); display:inline-block;"></span>
+            <span id="gps-text" style="color:var(--text-muted);">GPS zoeken...</span>
+            <span id="gps-accuracy" style="color:var(--text-muted); font-weight:600; font-size:10px;"></span>
+        </div>
         
         <div class="tracker-circle">
             <svg class="progress-ring" viewBox="0 0 190 190">
