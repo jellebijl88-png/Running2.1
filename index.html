@@ -477,5 +477,20 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="js/script.js" defer></script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then(registration => {
+          console.log('ServiceWorker succesvol geregistreerd met scope: ', registration.scope);
+        })
+        .catch(error => {
+          console.log('ServiceWorker registratie mislukt: ', error);
+        });
+    });
+  }
+</script>
+
 </body>
 </html>

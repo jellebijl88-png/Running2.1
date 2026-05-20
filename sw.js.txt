@@ -1,0 +1,28 @@
+const CACHE_NAME = 'running-app-v2';
+const urlsToCache = [
+  '',
+  'index.html',
+  'style.css',  pas aan naar jouw css bestand(en)
+  'app.js'      pas aan naar jouw javascript bestand(en)
+];
+
+ Installeer de service worker en cache de belangrijkste bestanden
+self.addEventListener('install', event = {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache = {
+        return cache.addAll(urlsToCache);
+      })
+  );
+});
+
+ Haal bestanden op uit de cache als er geen internet is
+self.addEventListener('fetch', event = {
+  event.respondWith(
+    caches.match(event.request)
+      .then(response = {
+         Return de cache hit, of haal het op van het netwerk
+        return response  fetch(event.request);
+      })
+  );
+});
