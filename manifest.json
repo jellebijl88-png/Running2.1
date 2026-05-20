@@ -1,17 +1,15 @@
 {
   "name": "Running2.1",
   "short_name": "Running",
-  "start_url": "/",
-    "id": "jellylegs-app-v2",
-  "display": "fullscreen",
-  "orientation": "portrait",
+  "start_url": "./",
+  "id": "jellylegs-app-v2",
   "display": "standalone",
+  "orientation": "portrait",
   "description": "De ultieme hardloop-app om je tijden en afstanden bij te houden.",
   "background_color": "#ffffff",
   "theme_color": "#27ae60",
-    "lang": "nl-NL",
+  "lang": "nl-NL",
   "prefer_related_applications": false,
-  
   "icons": [
     {
       "src": "icon-192x192.png",
