@@ -235,12 +235,72 @@
         </div>
 
         <div id="tab-training" class="tab-view">
-            <h2 style="margin-top:6px;">Training</h2>
-            <div class="card">
-                <span class="dash-label">Huidig Plan</span>
-                <select id="plan-select" onchange="APP.saveSelectedPlan()"></select>
+            <h2 style="margin-top:6px;">📋 Mijn Plan</h2>
+            
+            <!-- Plan Generator -->
+            <div id="plan-generator" class="card">
+                <span class="dash-label">🎯 Stel je doel in</span>
+                
+                <div style="margin-bottom:12px;">
+                    <span style="font-size:13px; font-weight:600; display:block; margin-bottom:4px;">Einddoel</span>
+                    <select id="goal-distance" onchange="APP.onPlanConfigChange()">
+                        <option value="0">🏃 Conditie verbeteren</option>
+                        <option value="3">3 Kilometer</option>
+                        <option value="5" selected>5 Kilometer</option>
+                        <option value="10">10 Kilometer</option>
+                        <option value="21.1">Halve Marathon</option>
+                    </select>
+                </div>
+                
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:12px;">
+                    <div>
+                        <span style="font-size:13px; font-weight:600; display:block; margin-bottom:4px;">Aantal weken</span>
+                        <select id="plan-weeks" onchange="APP.onPlanConfigChange()">
+                            <option value="4">4 weken</option>
+                            <option value="6">6 weken</option>
+                            <option value="8" selected>8 weken</option>
+                            <option value="10">10 weken</option>
+                            <option value="12">12 weken</option>
+                            <option value="16">16 weken</option>
+                        </select>
+                    </div>
+                    <div>
+                        <span style="font-size:13px; font-weight:600; display:block; margin-bottom:4px;">Trainingen/week</span>
+                        <select id="plan-frequency" onchange="APP.onPlanConfigChange()">
+                            <option value="2">2x</option>
+                            <option value="3" selected>3x</option>
+                            <option value="4">4x</option>
+                            <option value="5">5x</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div style="margin-bottom:14px;">
+                    <span style="font-size:13px; font-weight:600; display:block; margin-bottom:4px;">Huidig weekvolume (km)</span>
+                    <input type="number" id="plan-base-volume" min="1" max="100" value="5" onchange="APP.onPlanConfigChange()" style="margin:0;">
+                </div>
+                
+                <button id="btn-generate-plan" class="btn btn-primary" onclick="APP.generateDynamicPlan()">GENEREER PLAN</button>
             </div>
-            <div id="app-list"></div>
+            
+            <!-- Plan Display -->
+            <div id="plan-display" style="display:none;">
+                <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <span class="dash-label">Huidig Plan</span>
+                        <span id="plan-name" style="font-size:18px; font-weight:900; color:var(--text-main);"></span>
+                    </div>
+                    <button class="clear-history-btn" onclick="APP.clearDynamicPlan()" style="color:var(--danger); background:var(--danger-bg);">Verwijder</button>
+                </div>
+                <div id="plan-week-list"></div>
+            </div>
+            
+            <!-- Save indicator for generated plans -->
+            <div id="plan-empty-state" class="card" style="text-align:center; padding:30px;">
+                <span style="font-size:40px; display:block; margin-bottom:10px;">📋</span>
+                <p style="color:var(--text-muted); font-weight:600;">Stel hierboven je doel in en genereer een persoonlijk trainingsplan op basis van wetenschappelijke principes.</p>
+            </div>
+            
             <div class="card" id="baseline-card">
                 <span class="dash-label">📊 Basis Niveau & Schema's</span>
                 <p style="margin-bottom: 14px;">Bepaal je startniveau met de 30-minuten test of genereer direct een op maat gemaakt AI-schema.</p>
