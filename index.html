@@ -70,7 +70,7 @@
                 <div class="legend-item"><div class="dot" style="background:var(--accent)"></div> Warmup</div>
                 <div class="legend-item"><div class="dot" style="background:var(--danger)"></div> Sprint</div>
                 <div class="legend-item"><div class="dot" style="background:var(--primary)"></div> Run</div>
-                <div class="legend-item"><div class="dot" style="background:var(--success)"></div> Jog</div>
+                <div class="legend-item"><div class="dot" style="background:var(--success)"></div> Jogging</div>
                 <div class="legend-item"><div class="dot" style="background:var(--warning)"></div> Walk</div>
             </div>
             <div style="display:flex; justify-content: space-between; margin: 20px 0; font-weight:800">
@@ -78,7 +78,7 @@
                 <span id="pre-type" style="color:var(--primary)">Schema</span>
             </div>
             <button class="btn btn-primary" onclick="APP.realStart()">START TRAINING</button>
-            <button class="btn btn-ghost" style="margin-top:10px; background: transparent; border: none;" onclick="document.getElementById('preview-overlay').style.display='none'">Annuleren</button>
+            <button class="btn btn-ghost" style="margin-top:10px; background: transparent; border: none;" onclick="document.getElementById('preview-overlay').style.display='none'; HistoryManager.close();">Annuleren</button>
         </div>
     </div>
 
@@ -133,8 +133,8 @@
                 <div class="grid-4">
                     <div><div style="font-size:16px; font-weight:900; color:var(--danger)" id="stat-sprint-percent">0%</div><div style="font-size:9px; font-weight:600; color:var(--text-muted)">SPRINT</div></div>
                     <div><div style="font-size:16px; font-weight:900; color:var(--primary)" id="stat-run-percent">0%</div><div style="font-size:9px; font-weight:600; color:var(--text-muted)">RUN</div></div>
-                    <div><div style="font-size:16px; font-weight:900; color:var(--success)" id="stat-jog-percent">0%</div><div style="font-size:9px; font-weight:600; color:var(--text-muted)">JOG</div></div>
-                    <div><div style="font-size:16px; font-weight:900; color:var(--warning)" id="stat-walk-percent">0%</div><div style="font-size:9px; font-weight:600; color:var(--text-muted)">WALK</div></div>
+                    <div><div style="font-size:16px; font-weight:900; color:var(--success)" id="stat-jog-percent">0%</div><div style="font-size:9px; font-weight:600; color:var(--text-muted)">JOGGEN</div></div>
+                    <div><div style="font-size:16px; font-weight:900; color:var(--warning)" id="stat-walk-percent">0%</div><div style="font-size:9px; font-weight:600; color:var(--text-muted)">WANDELEN</div></div>
                 </div>
                 <div class="grid-4" style="margin-top:10px">
                     <div><div style="font-size:11px; font-weight:700;" id="stat-sprint-time">0:00</div></div>
@@ -176,17 +176,15 @@
 
             <!-- Recente Activiteit -->
             <h3 class="section-title">Recente Activiteit</h3>
-            <div class="card recent-activity-card">
+            <div class="card recent-activity-card" id="recent-activity-card">
                 <div class="recent-activity-layout">
-                    <div id="recent-activity-map" class="activity-map-placeholder">
-                        <div class="map-mini-route"></div>
-                    </div>
+                    <div id="recent-activity-map" class="activity-map-placeholder"></div>
                     <div class="activity-details">
                         <span id="recent-activity-date" class="activity-date">Geen sessies</span>
                         <span id="recent-activity-distance" class="activity-distance">-- KM</span>
                         <div class="activity-meta">
-                            <span id="recent-activity-time" class="activity-meta-item">Tijd --:--</span>
-                            <span id="recent-activity-pace" class="activity-meta-item">Tempo --:-- min/km</span>
+                            <span class="activity-meta-item">⏱️ <span id="recent-activity-time">Tijd --:--</span></span>
+                            <span class="activity-meta-item">⚡ <span id="recent-activity-pace">Tempo --:-- min/km</span></span>
                         </div>
                     </div>
                 </div>
@@ -228,11 +226,6 @@
                 </div>
             </div>
 
-            <div style="display:flex; justify-content:space-between; align-items:center; margin: 20px 0 10px;">
-                <h3 style="font-size:16px;">Logboek (Recent)</h3>
-                <button class="clear-history-btn" onclick="DB.clearAllHistory()">Wis alles</button>
-            </div>
-            <div id="history-list"></div>
         </div>
 
         <div id="tab-training" class="tab-view">
@@ -325,7 +318,14 @@
                 <div id="weekly-comparison"></div>
             </div>
             <div class="card">
-                <span class="dash-label">Trainingslogboek per week</span>
+                <span class="dash-label">🔥 Activiteiten Kalender</span>
+                <div id="calendar-heatmap" style="margin-top: 10px;"></div>
+            </div>
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span class="dash-label" style="margin-bottom:0;">Trainingslogboek per week</span>
+                    <button class="clear-history-btn" onclick="DB.clearAllHistory()" style="color:var(--danger); background:var(--danger-bg);">Wis alles</button>
+                </div>
                 <div id="data-timeline"></div>
             </div>
             <div class="card">
