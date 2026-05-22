@@ -66,14 +66,14 @@ body {
 }
 
 #app-container {
-    width: 100%; max-width: 390px; height: 844px; max-height: 100vh;
+    width: 100%; max-width: 390px; height: 100vh; height: 100dvh;
     background-color: var(--bg-dark); position: relative; overflow: hidden; 
     display: flex; flex-direction: column; border-radius: 44px;
     box-shadow: 0 25px 60px -12px rgba(0,0,0,0.5); border: 6px solid #1a1a1e;
 }
 
 @media (max-width: 400px), (max-height: 850px) {
-    #app-container { border-radius: 0; border: none; height: 100vh; max-width: 100%; box-shadow: none; }
+    #app-container { border-radius: 0; border: none; height: 100vh; height: 100dvh; max-width: 100%; box-shadow: none; }
     body { background-color: var(--bg-dark); display: block; }
 }
 
