@@ -737,7 +737,7 @@ const UI = {
         }
         mapEl.style.height = '160px';
         mapEl.style.width = '100%';
-        // Use a simpler, more reliable tile source (OpenStreetMap renders faster on mobile)
+        // Use OpenStreetMap tiles for reliable rendering
         var tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
         this.liveMapInstance = L.map(mapEl, { zoomControl: false, attributionControl: false, fadeAnimation: false, zoomAnimation: false, markerZoomAnimation: false });
         L.tileLayer(tileUrl, { zoomControl: false, attributionControl: false, maxZoom: 19 }).addTo(this.liveMapInstance);
@@ -1644,22 +1644,140 @@ const APP = {
     generateShareImage: function() {
         var canvas = document.createElement('canvas'); canvas.width = 800; canvas.height = 800;
         var ctx = canvas.getContext('2d');
-        var gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+
+        // Top section: dark header with stats
+        var headerHeight = 310;
+        var gradient = ctx.createLinearGradient(0, 0, 0, headerHeight);
         gradient.addColorStop(0, '#1c1c1e'); gradient.addColorStop(1, '#2c2c2e');
-        ctx.fillStyle = gradient; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = gradient; ctx.fillRect(0, 0, canvas.width, headerHeight);
+
+        // App title
         ctx.fillStyle = 'white'; ctx.font = 'bold 48px Inter, sans-serif'; ctx.fillText('JellyLegs', 40, 100);
+        // Stats
         ctx.fillStyle = '#ff6b00'; ctx.font = 'bold 24px Inter, sans-serif'; ctx.fillText('🏃‍♂️ ' + document.getElementById('res-d').innerText + ' km', 40, 170);
         ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '18px Inter, sans-serif'; ctx.fillText('⏱ ' + document.getElementById('res-time').innerText, 40, 220);
         ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '18px Inter, sans-serif'; ctx.fillText('🔥 ' + document.getElementById('res-cal').innerText + ' kcal', 40, 260);
+
+        // Map area background
+        var mapY = headerHeight;
+        var mapHeight = canvas.height - mapY - 50; // Leave room for footer
+        var mapLeft = 0;
+        var mapTop = mapY;
+        var mapWidth = canvas.width;
+        
+        // Map background color (like OpenStreetMap default tile color)
+        ctx.fillStyle = '#f8f4f0';
+        ctx.fillRect(mapLeft, mapTop, mapWidth, mapHeight);
+
         var route = STATE.viewedRoute || STATE.currentRoute || [];
         if (route.length >= 2) {
-            ctx.strokeStyle = '#ff6b00'; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            // Calculate route bounds
             var minLat = Math.min.apply(null, route.map(function(p) { return p[0]; })), maxLat = Math.max.apply(null, route.map(function(p) { return p[0]; }));
             var minLng = Math.min.apply(null, route.map(function(p) { return p[1]; })), maxLng = Math.max.apply(null, route.map(function(p) { return p[1]; }));
             var lr = maxLat - minLat || 0.001; var lnr = maxLng - minLng || 0.001;
-            ctx.beginPath(); route.forEach(function(p, i) { var x = ((p[1] - minLng) / lnr) * 600 + 100; var y = ((maxLat - p[0]) / lr) * 400 + 350; if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); }); ctx.stroke();
+            
+            // Padding around route (20% extra on each side)
+            var padX = mapWidth * 0.05;
+            var padY = mapHeight * 0.05;
+            var drawW = mapWidth - padX * 2;
+            var drawH = mapHeight - padY * 2;
+
+            // Helper to convert lat/lng to canvas coordinates
+            function toCanvas(lat, lng) {
+                var x = ((lng - minLng) / lnr) * drawW + padX;
+                var y = ((maxLat - lat) / lr) * drawH + mapTop + padY;
+                return { x: x, y: y };
+            }
+
+            // Draw subtle grid lines (simulating map tile grid)
+            ctx.strokeStyle = 'rgba(0,0,0,0.04)';
+            ctx.lineWidth = 1;
+            var gridSteps = 8;
+            for (var i = 0; i <= gridSteps; i++) {
+                var frac = i / gridSteps;
+                // Vertical lines
+                ctx.beginPath();
+                ctx.moveTo(padX + frac * drawW, mapTop + padY);
+                ctx.lineTo(padX + frac * drawW, mapTop + mapHeight - padY);
+                ctx.stroke();
+                // Horizontal lines
+                ctx.beginPath();
+                ctx.moveTo(padX, mapTop + padY + frac * drawH);
+                ctx.lineTo(mapWidth - padX, mapTop + padY + frac * drawH);
+                ctx.stroke();
+            }
+
+            // Draw minor roads (lighter, thinner lines simulating street grid)
+            var roadColors = ['rgba(200,190,180,0.4)', 'rgba(210,200,190,0.3)'];
+            for (var r = 0; r < 3; r++) {
+                ctx.strokeStyle = roadColors[r % roadColors.length];
+                ctx.lineWidth = r === 0 ? 2 : 1;
+                for (var j = 0; j < 4; j++) {
+                    var rFrac = (j + 1) / 5;
+                    ctx.beginPath();
+                    ctx.moveTo(toCanvas(minLat + lr * rFrac, minLng).x, toCanvas(minLat + lr * rFrac, minLng).y);
+                    ctx.lineTo(toCanvas(minLat + lr * rFrac, maxLng).x, toCanvas(minLat + lr * rFrac, maxLng).y);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(toCanvas(minLat, minLng + lnr * rFrac).x, toCanvas(minLat, minLng + lnr * rFrac).y);
+                    ctx.lineTo(toCanvas(maxLat, minLng + lnr * rFrac).x, toCanvas(maxLat, minLng + lnr * rFrac).y);
+                    ctx.stroke();
+                }
+            }
+
+            // Draw the route line
+            ctx.strokeStyle = '#ff6b00';
+            ctx.lineWidth = 10;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.shadowColor = 'rgba(255,107,0,0.3)';
+            ctx.shadowBlur = 12;
+            ctx.beginPath();
+            route.forEach(function(p, i) {
+                var c = toCanvas(p[0], p[1]);
+                if (i === 0) ctx.moveTo(c.x, c.y);
+                else ctx.lineTo(c.x, c.y);
+            });
+            ctx.stroke();
+            
+            // Draw start marker (green dot)
+            ctx.shadowBlur = 0;
+            var startC = toCanvas(route[0][0], route[0][1]);
+            ctx.fillStyle = '#30d158';
+            ctx.beginPath();
+            ctx.arc(startC.x, startC.y, 12, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 10px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('START', startC.x, startC.y + 24);
+
+            // Draw end marker (red pin)
+            var endC = toCanvas(route[route.length - 1][0], route[route.length - 1][1]);
+            ctx.fillStyle = '#ff3b30';
+            ctx.beginPath();
+            ctx.arc(endC.x, endC.y, 12, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 10px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('FINISH', endC.x, endC.y + 24);
+        } else {
+            // No route data - show a placeholder message on the map area
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.font = '18px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Geen route beschikbaar', canvas.width / 2, mapTop + mapHeight / 2);
         }
-        ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = '14px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('JellyLegs - Powered by AI', canvas.width / 2, 760);
+
+        // Footer
+        ctx.fillStyle = '#1c1c1e';
+        ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.font = '14px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('JellyLegs - Powered by AI', canvas.width / 2, canvas.height - 20);
+
         var link = document.createElement('a'); link.download = 'jellylegs-run.png'; link.href = canvas.toDataURL(); link.click();
     },
 
