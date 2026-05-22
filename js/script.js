@@ -456,12 +456,16 @@ const UI = {
             }
         } else {
             this._recentRunId = null;
-            dateEl.innerText = 'Geen sessies';
-            distEl.innerText = '-- KM';
-            timeEl.innerText = 'Tijd --:--';
-            paceEl.innerText = 'Tempo --:-- min/km';
             this._destroyMiniMap();
-            mapEl.innerHTML = '<div class="map-mini-route"></div>';
+            // Show a simple message when there are no activities yet
+            mapEl.style.display = 'none';
+            dateEl.style.display = 'none';
+            distEl.innerText = 'Nog geen recente activiteiten';
+            distEl.style.fontSize = '13px';
+            distEl.style.fontWeight = '600';
+            distEl.style.color = 'var(--text-muted)';
+            timeEl.innerText = '';
+            paceEl.innerText = '';
         }
     },
 
@@ -724,14 +728,25 @@ const UI = {
     initLiveMap: function() {
         if (!this.liveMapEnabled) return;
         var mapEl = document.getElementById('live-training-map');
-        if (this.liveMapInstance) { this.liveMapInstance.invalidateSize(); return; }
+        if (this.liveMapInstance) {
+            // If already initialized, just invalidate size to handle layout changes
+            var self = this;
+            setTimeout(function() { if (self.liveMapInstance) self.liveMapInstance.invalidateSize(); }, 50);
+            setTimeout(function() { if (self.liveMapInstance) self.liveMapInstance.invalidateSize(); }, 300);
+            return;
+        }
         mapEl.style.height = '160px';
         mapEl.style.width = '100%';
-        var tileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+        // Use a simpler, more reliable tile source (OpenStreetMap renders faster on mobile)
+        var tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
         this.liveMapInstance = L.map(mapEl, { zoomControl: false, attributionControl: false, fadeAnimation: false, zoomAnimation: false, markerZoomAnimation: false });
-        L.tileLayer(tileUrl, { zoomControl: false, attributionControl: false }).addTo(this.liveMapInstance);
+        L.tileLayer(tileUrl, { zoomControl: false, attributionControl: false, maxZoom: 19 }).addTo(this.liveMapInstance);
         this.livePolyline = L.polyline([], { color: '#ff6b00', weight: 5 }).addTo(this.liveMapInstance);
-        requestAnimationFrame(function() { if (this.liveMapInstance) this.liveMapInstance.invalidateSize(); }.bind(this));
+        // Multiple invalidate calls with delays to ensure proper sizing after display changes from none to flex
+        var self = this;
+        setTimeout(function() { if (self.liveMapInstance) self.liveMapInstance.invalidateSize(); }, 100);
+        setTimeout(function() { if (self.liveMapInstance) self.liveMapInstance.invalidateSize(); }, 500);
+        setTimeout(function() { if (self.liveMapInstance) self.liveMapInstance.invalidateSize(); }, 1000);
     },
 
     updateLiveMap: function(route) {
@@ -1300,6 +1315,8 @@ const APP = {
         document.getElementById('timer-display').classList.remove('active');
         // Pop the timer state since we're transitioning to result
         HistoryManager.close();
+        // Clear any stale viewedRoute so generateShareImage uses currentRoute
+        STATE.viewedRoute = null;
         
         document.getElementById('tab-home').classList.add('active');
 
