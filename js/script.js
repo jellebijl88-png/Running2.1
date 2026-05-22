@@ -17,6 +17,148 @@ const LS = {
 };
 
 // ==============================================
+// HISTORY API MANAGER
+// ==============================================
+const HistoryManager = {
+    /** @type {Array<{id: string, name: string}>} */
+    _stack: [],
+
+    /** Maximum stack depth to prevent excessive history entries */
+    _MAX_DEPTH: 20,
+
+    /** Whether we're currently handling a popstate event (to avoid double-triggering close logic) */
+    _handlingPopState: false,
+
+    init: function() {
+        window.addEventListener('popstate', this._onPopState.bind(this));
+        // Push initial state so the first back press goes back to this state
+        history.replaceState({ id: '__root__', name: 'root' }, '');
+        this._stack = [{ id: '__root__', name: 'root' }];
+    },
+
+    /**
+     * Open a view/overlay. Pushes a history state.
+     * @param {string} id - Unique identifier for the view (e.g. 'preview', 'result', 'custom-plan', 'changelog', 'timer')
+     * @param {string} [name] - Display name for the state
+     * @param {Function} [onPopCallback] - Function to call when this state is popped (back navigation). If not provided, will try to find a close function automatically.
+     */
+    open: function(id, name, onPopCallback) {
+        if (this._stack.length >= this._MAX_DEPTH) {
+            // Prevent stack from growing too large - replace the deepest non-root entry
+            var deepestIdx = this._stack.findIndex(function(s) { return s.id !== '__root__'; });
+            if (deepestIdx > 0) {
+                var removed = this._stack.splice(deepestIdx, 1);
+                // We can't truly remove a history entry, but we can replace the last one
+                // This is a best-effort approach
+            }
+        }
+
+        var state = { id: id, name: name || id, onPopCallback: onPopCallback ? onPopCallback.toString() : null };
+        history.pushState(state, '');
+        this._stack.push({ id: id, name: name || id, onPopCallback: onPopCallback || null });
+    },
+
+    /**
+     * Close the current view (called from close/back buttons).
+     * Pops the last history state so the back button doesn't try to close again.
+     */
+    close: function() {
+        if (this._stack.length <= 1) return; // Don't pop root
+        var popped = this._stack.pop();
+        // Go back in history to 'undo' the pushState
+        if (history.state && history.state.id === popped.id) {
+            this._handlingPopState = true;
+            history.back();
+            // Reset flag after a short delay
+            var self = this;
+            setTimeout(function() { self._handlingPopState = false; }, 100);
+        }
+    },
+
+    /**
+     * Called when a user presses the back button / back swipe.
+     * Finds the last open view and closes it.
+     */
+    _onPopState: function(e) {
+        if (this._handlingPopState) {
+            this._handlingPopState = false;
+            return;
+        }
+
+        // We need to close the topmost view in our stack
+        if (this._stack.length <= 1) return; // Nothing to close beyond root
+
+        var currentState = e.state;
+        var popped = this._stack.pop();
+
+        // Determine what to close based on the popped state id
+        var viewId = (currentState && currentState.id) || (popped && popped.id);
+
+        // If we have a stored callback, try to execute it
+        if (popped && popped.onPopCallback) {
+            try {
+                // Use setTimeout to let the popstate finish cleanly first
+                var callback = popped.onPopCallback;
+                setTimeout(function() { callback(); }, 0);
+                return;
+            } catch (err) {
+                console.warn('HistoryManager: onPopCallback error', err);
+            }
+        }
+
+        // Fallback: auto-detect and close the appropriate view
+        if (this._isViewVisible('timer-display')) {
+            this._closeView('timer-display');
+        } else if (this._isViewVisible('preview-overlay')) {
+            this._closeView('preview-overlay');
+        } else if (this._isViewVisible('result-screen')) {
+            this._closeView('result-screen');
+        } else if (this._isViewVisible('custom-plan-sheet')) {
+            this._closeView('custom-plan-sheet');
+        } else if (document.getElementById('changelog-overlay')) {
+            this._closeView('changelog-overlay');
+        }
+    },
+
+    /** Check if a view element is currently visible */
+    _isViewVisible: function(elId) {
+        var el = document.getElementById(elId);
+        if (!el) return false;
+        var style = window.getComputedStyle(el);
+        // Some overlays use display: none/flex (e.g. preview-overlay), others use .active class (e.g. result-screen, custom-plan-sheet)
+        var isVisibleByDisplay = style.display !== 'none';
+        var isVisibleByClass = el.classList.contains('active');
+        return isVisibleByDisplay || isVisibleByClass;
+    },
+
+    /** Close a view by its element ID */
+    _closeView: function(elId) {
+        var el = document.getElementById(elId);
+        if (!el) return;
+        switch (elId) {
+            case 'preview-overlay':
+                el.style.display = 'none';
+                break;
+            case 'result-screen':
+                UI.closeResultScreen(false);
+                break;
+            case 'custom-plan-sheet':
+                UI.closeCustomPlanSheet({ stopPropagation: function() {} });
+                break;
+            case 'timer-display':
+                APP.finishTraining();
+                break;
+            case 'changelog-overlay':
+                var overlay = document.getElementById('changelog-overlay');
+                if (overlay) overlay.remove();
+                break;
+            default:
+                el.style.display = 'none';
+        }
+    }
+};
+
+// ==============================================
 // DATA MODEL (DB)
 // ==============================================
 const DB = {
@@ -91,9 +233,25 @@ const DB = {
     },
 
     saveUserProfile: function() {
-        LS.set('user_weight', document.getElementById('user-weight').value);
-        LS.set('user_height', document.getElementById('user-height').value);
-        LS.set('user_age', document.getElementById('user-age').value);
+        var w = parseInt(document.getElementById('user-weight').value);
+        var h = parseInt(document.getElementById('user-height').value);
+        var a = parseInt(document.getElementById('user-age').value);
+
+        // Valideer en corrigeer waarden
+        if (isNaN(w) || w < 30) w = 30;
+        if (w > 200) w = 200;
+        if (isNaN(h) || h < 100) h = 100;
+        if (h > 220) h = 220;
+        if (isNaN(a) || a < 12) a = 12;
+        if (a > 99) a = 99;
+
+        document.getElementById('user-weight').value = w;
+        document.getElementById('user-height').value = h;
+        document.getElementById('user-age').value = a;
+
+        LS.set('user_weight', w.toString());
+        LS.set('user_height', h.toString());
+        LS.set('user_age', a.toString());
         LS.set('user_gender', document.getElementById('user-gender').value);
         APP.vibrate([50]);
         const fb = document.getElementById('save-feedback');
@@ -210,14 +368,34 @@ const UI = {
         document.getElementById('onboard-step-2').classList.add('active');
     },
 
-    openCustomPlanSheet: function() { document.getElementById('custom-plan-sheet').classList.add('active'); },
-    closeCustomPlanSheet: function(e) { if (e) e.stopPropagation(); document.getElementById('custom-plan-sheet').classList.remove('active'); },
+    openCustomPlanSheet: function() {
+        document.getElementById('custom-plan-sheet').classList.add('active');
+        HistoryManager.open('custom-plan', 'Custom Plan', function() {
+            document.getElementById('custom-plan-sheet').classList.remove('active');
+        });
+    },
+    closeCustomPlanSheet: function(e) {
+        if (e) e.stopPropagation();
+        document.getElementById('custom-plan-sheet').classList.remove('active');
+        HistoryManager.close();
+    },
 
-    openResultScreen: function() { document.getElementById('result-screen').classList.add('active'); },
+    openResultScreen: function() {
+        document.getElementById('result-screen').classList.add('active');
+        HistoryManager.open('result', 'Result', function() {
+            document.getElementById('result-screen').classList.remove('active');
+        });
+    },
     closeResultScreen: function(reload) {
         document.getElementById('result-screen').classList.remove('active');
+        HistoryManager.close();
         if (reload) setTimeout(() => location.reload(), 400);
     },
+
+    _recentActivityMap: null,
+    _recentActivityPolyline: null,
+
+    _recentRunId: null,
 
     renderRecentActivity: function(runs) {
         var sorted = runs.slice().sort(function(a, b) { return b.id - a.id; });
@@ -226,9 +404,17 @@ const UI = {
         var timeEl = document.getElementById('recent-activity-time');
         var paceEl = document.getElementById('recent-activity-pace');
         var mapEl = document.getElementById('recent-activity-map');
+        var cardEl = document.getElementById('recent-activity-card');
+
+        // Make card clickable to view the latest run
+        if (cardEl) {
+            cardEl.style.cursor = 'pointer';
+            cardEl.onclick = null;
+        }
 
         if (sorted.length > 0) {
             var latest = sorted[0];
+            this._recentRunId = latest.id;
             dateEl.innerText = latest.d;
             distEl.innerText = latest.dist + ' KM';
             var dur = parseInt(latest.duration) || 0;
@@ -242,29 +428,41 @@ const UI = {
                 paceEl.innerText = 'Tempo --:-- min/km';
             }
             if (latest.route && latest.route.length >= 2) {
-                this._renderMiniRoute(mapEl, latest.route);
+                this._renderMiniMap(mapEl, latest.route);
             } else {
+                this._destroyMiniMap();
                 mapEl.innerHTML = '<div class="map-mini-route"></div>';
             }
+            // Click on the card to view the latest run
+            if (cardEl) {
+                cardEl.onclick = function(e) {
+                    // Don't trigger if clicking the map (Leaflet handles its own clicks)
+                    if (e.target.closest('.leaflet-container')) return;
+                    APP.viewRun(UI._recentRunId);
+                };
+            }
         } else {
+            this._recentRunId = null;
             dateEl.innerText = 'Geen sessies';
             distEl.innerText = '-- KM';
             timeEl.innerText = 'Tijd --:--';
             paceEl.innerText = 'Tempo --:-- min/km';
+            this._destroyMiniMap();
             mapEl.innerHTML = '<div class="map-mini-route"></div>';
         }
     },
 
-    _renderMiniRoute: function(container, route) {
+    _destroyMiniMap: function() {
+        if (this._recentActivityMap) {
+            this._recentActivityMap.remove();
+            this._recentActivityMap = null;
+            this._recentActivityPolyline = null;
+        }
+    },
+
+    _renderMiniMap: function(container, route) {
+        this._destroyMiniMap();
         container.innerHTML = '';
-        var svgNS = 'http://www.w3.org/2000/svg';
-        var svg = document.createElementNS(svgNS, 'svg');
-        svg.setAttribute('width', '100%');
-        svg.setAttribute('height', '100%');
-        svg.setAttribute('viewBox', '0 0 100 100');
-        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-        svg.style.position = 'absolute';
-        svg.style.inset = '0';
 
         var minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
         route.forEach(function(p) {
@@ -273,49 +471,43 @@ const UI = {
             if (p[1] < minLng) minLng = p[1];
             if (p[1] > maxLng) maxLng = p[1];
         });
-        var pad = 0.0002;
+        var pad = 0.0004;
         if (maxLat - minLat < 0.0005) { minLat -= pad; maxLat += pad; }
         if (maxLng - minLng < 0.0005) { minLng -= pad; maxLng += pad; }
-        var latRange = maxLat - minLat || 0.001;
-        var lngRange = maxLng - minLng || 0.001;
 
-        var polyline = document.createElementNS(svgNS, 'polyline');
-        var points = route.map(function(p) {
-            var x = ((p[1] - minLng) / lngRange) * 90 + 5;
-            var y = ((maxLat - p[0]) / latRange) * 90 + 5;
-            return x + ',' + y;
-        }).join(' ');
-        polyline.setAttribute('points', points);
-        polyline.setAttribute('fill', 'none');
-        polyline.setAttribute('stroke', 'var(--primary)');
-        polyline.setAttribute('stroke-width', '3');
-        polyline.setAttribute('stroke-linecap', 'round');
-        polyline.setAttribute('stroke-linejoin', 'round');
-        polyline.setAttribute('opacity', '0.7');
-        svg.appendChild(polyline);
+        var map = L.map(container, {
+            zoomControl: false,
+            attributionControl: false,
+            dragging: false,
+            scrollWheelZoom: false,
+            touchZoom: false,
+            doubleClickZoom: false,
+            boxZoom: false,
+            keyboard: false,
+            fadeAnimation: false,
+            zoomAnimation: false,
+            markerZoomAnimation: false
+        });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            zoomControl: false,
+            attributionControl: false
+        }).addTo(map);
 
-        if (route.length > 0) {
-            var sx = ((route[0][1] - minLng) / lngRange) * 90 + 5;
-            var sy = ((maxLat - route[0][0]) / latRange) * 90 + 5;
-            var startDot = document.createElementNS(svgNS, 'circle');
-            startDot.setAttribute('cx', sx);
-            startDot.setAttribute('cy', sy);
-            startDot.setAttribute('r', '3');
-            startDot.setAttribute('fill', 'var(--success)');
-            svg.appendChild(startDot);
+        var latLngs = route.map(function(p) { return [p[0], p[1]]; });
+        var polyline = L.polyline(latLngs, { color: '#ff6b00', weight: 4, opacity: 0.8 }).addTo(map);
+
+        var bounds = L.latLngBounds(latLngs);
+        if (bounds.isValid()) {
+            map.fitBounds(bounds, { padding: [10, 10], maxZoom: 17 });
         }
-        if (route.length > 1) {
-            var last = route[route.length - 1];
-            var ex = ((last[1] - minLng) / lngRange) * 90 + 5;
-            var ey = ((maxLat - last[0]) / latRange) * 90 + 5;
-            var endDot = document.createElementNS(svgNS, 'circle');
-            endDot.setAttribute('cx', ex);
-            endDot.setAttribute('cy', ey);
-            endDot.setAttribute('r', '3');
-            endDot.setAttribute('fill', 'var(--danger)');
-            svg.appendChild(endDot);
-        }
-        container.appendChild(svg);
+
+        this._recentActivityMap = map;
+        this._recentActivityPolyline = polyline;
+
+        // Force correct sizing after a short delay (Leaflet needs this inside hidden containers)
+        setTimeout(function() {
+            map.invalidateSize();
+        }, 100);
     },
 
     renderDashboard: function(runs) {
@@ -340,10 +532,6 @@ const UI = {
         const sc = document.getElementById('streak-container');
         if (streak > 0) { sc.style.display = 'inline-flex'; document.getElementById('dash-streak').innerText = streak; }
         else sc.style.display = 'none';
-        const h = runs.slice().sort((a, b) => b.id - a.id);
-        document.getElementById('history-list').innerHTML = h.slice(0, 10).map(r =>
-            '<div class="history-item" onclick="APP.viewRun(' + r.id + ')"><div style="flex-grow:1"><div style="font-weight:800; font-size:14px;">' + r.n + '</div><div style="font-size:11px; color:var(--text-muted)">' + r.d + ' &bull; ' + r.dist + 'km</div></div><button class="delete-btn" aria-label="Verwijder activiteit" onclick="DB.delete(event, ' + r.id + ')">🗑️</button></div>'
-        ).join('') || '<div style="color:var(--text-muted); font-size:13px; text-align:center; padding:10px">Nog geen activiteiten</div>';
     },
 
     renderDataTab: function(runs) {
@@ -402,7 +590,7 @@ const UI = {
         wd.forEach(function(w) {
             tl += '<div style="margin-bottom:20px;"><div style="display:flex; justify-content:space-between; margin-bottom:6px; border-bottom:1px solid var(--border); padding-bottom:4px;"><span style="font-weight:900;">' + w.label + '</span><span style="color:var(--primary); font-size:12px; font-weight:700;">' + w.totalDist.toFixed(1) + ' KM</span></div>';
             w.runs.sort(function(a, b) { return b.id - a.id; }).forEach(function(r) {
-                tl += '<div class="history-item" onclick="APP.viewRun(' + r.id + ')"><div style="flex-grow:1"><div style="font-weight:800; font-size:14px;">' + r.n + '</div><div style="font-size:11px; color:var(--text-muted)">' + r.d + ' &bull; ' + r.dist + 'km &bull; ' + APP.formatT(r.duration || 0) + '</div></div><div style="color:var(--primary); font-weight:900; font-size:18px;">›</div></div>';
+                tl += '<div class="history-item" onclick="APP.viewRun(' + r.id + ')"><div style="flex-grow:1"><div style="font-weight:800; font-size:14px;">' + r.n + '</div><div style="font-size:11px; color:var(--text-muted)">' + r.d + ' &bull; ' + r.dist + 'km &bull; ' + APP.formatT(r.duration || 0) + '</div></div><button class="delete-btn" aria-label="Verwijder sessie" onclick="event.stopPropagation(); DB.delete(event, ' + r.id + ')">🗑️</button></div>';
             });
             tl += '</div>';
         });
@@ -411,14 +599,7 @@ const UI = {
 
     _renderCalendarHeatmap: function(runs) {
         var hc = document.getElementById('calendar-heatmap');
-        if (!hc) {
-            var dt = document.getElementById('tab-data');
-            var c = dt.querySelector('.card');
-            var nc = document.createElement('div'); nc.className = 'card';
-            nc.innerHTML = '<span class="dash-label">🔥 Activiteiten Kalender</span><div id="calendar-heatmap" style="margin-top: 14px;"></div>';
-            c.parentElement.insertBefore(nc, c.nextSibling);
-            hc = document.getElementById('calendar-heatmap');
-        }
+        if (!hc) return;
         var dm = {}; runs.forEach(function(r) { dm[r.d] = (dm[r.d] || 0) + parseFloat(r.dist); });
         var maxD = Math.max.apply(null, Object.values(dm).concat([0.01]));
         var today = new Date(), dow = today.getDay() || 7;
@@ -515,13 +696,16 @@ const UI = {
         
         if (!training) { APP.speak('Training niet gevonden'); return; }
         
-        STATE.sessionBlocks = APP.applyCustomTimings(training.b);
+        STATE.sessionBlocks = APP._translateSessionBlocks(APP.applyCustomTimings(training.b));
         document.getElementById('pre-title').innerText = training.label;
         document.getElementById('pre-time').innerText = Math.round(STATE.sessionBlocks.reduce(function(a, b) { return a + b.t; }, 0) / 60) + ' min';
         document.getElementById('pre-type').innerText = plan === 'dynamic' ? 'Dynamisch Plan' : (STATE.schemas[plan] ? STATE.schemas[plan].name : 'Plan');
         var maxT = Math.max.apply(null, STATE.sessionBlocks.map(function(b) { return b.t; }));
         document.getElementById('pre-chart').innerHTML = STATE.sessionBlocks.map(function(b) { return '<div class="bar ' + b.m + '" style="height:' + Math.max(15, (b.t / maxT) * 100) + '%"><span>' + Math.round(b.t / 60) + 'm</span></div>'; }).join('');
         document.getElementById('preview-overlay').style.display = 'flex';
+        HistoryManager.open('preview', 'Training Preview', function() {
+            document.getElementById('preview-overlay').style.display = 'none';
+        });
     },
 
     initLiveMap: function() {
@@ -589,7 +773,7 @@ const UI = {
         overlay.id = 'changelog-overlay';
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);backdrop-filter:blur(8px);z-index:5000;display:flex;align-items:center;padding:24px;overflow-y:auto;';
         var content = document.createElement('div'); content.className = 'card'; content.style.cssText = 'width:100%;max-width:480px;margin:auto;';
-        var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h2 style="margin:0">📜 Wijzigingen</h2><button class="clear-history-btn" onclick="this.closest(\'#changelog-overlay\').remove()">Sluiten</button></div>';
+        var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h2 style="margin:0">📜 Wijzigingen</h2><button class="clear-history-btn" id="changelog-close-btn">Sluiten</button></div>';
         APP.CHANGELOG.forEach(function(e) {
             html += '<div style="margin-bottom:16px;padding-bottom:12px;border-bottom:var(--border)"><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><span style="font-size:14px;font-weight:900;color:var(--primary)">v' + e.version + '</span><span style="font-size:10px;font-weight:600;color:var(--text-muted)">' + e.date + '</span></div><ul style="margin:0;padding-left:18px;font-size:12px;">';
             e.changes.forEach(function(c) { html += '<li style="margin-bottom:3px;">' + c + '</li>'; });
@@ -598,6 +782,21 @@ const UI = {
         content.innerHTML = html;
         overlay.appendChild(content);
         document.getElementById('app-container').appendChild(overlay);
+        HistoryManager.open('changelog', 'Changelog', function() {
+            var o = document.getElementById('changelog-overlay');
+            if (o) o.remove();
+        });
+        // Bind close button after element exists in DOM
+        var self = this;
+        setTimeout(function() {
+            var closeBtn = document.getElementById('changelog-close-btn');
+            if (closeBtn) {
+                closeBtn.onclick = function() {
+                    document.getElementById('changelog-overlay').remove();
+                    HistoryManager.close();
+                };
+            }
+        }, 0);
     }
 };
 
@@ -667,6 +866,9 @@ const APP = {
         if (!LS.get('onboarding_complete')) {
             document.getElementById('onboarding-screen').style.display = 'block';
         }
+
+        // Initialize HistoryManager
+        HistoryManager.init();
     },
 
     finishOnboarding: function(startTest) {
@@ -720,6 +922,53 @@ const APP = {
         LS.set(key, !(LS.get(key) === 'true'));
         if (plan === 'dynamic') UI.renderDynamicPlan(DB.getDynamicPlan());
         else UI.renderPlan(plan);
+    },
+
+    // Mapping van technische/oude namen naar eenvoudige display labels
+    // De m (mode) blijft de korte code (warmup/sprint/run/jog/walk) voor CSS classes
+    // Alleen s (display text) wordt vertaald naar Nederlands
+
+    // Bepaalt de korte mode code op basis van mode en description
+    _getSimpleMode: function(mode, description) {
+        var desc = (description || '').toLowerCase();
+        // Herken bekende modes direct
+        if (mode === 'warmup' || mode === 'warmingup') return 'warmup';
+        if (mode === 'sprint') return 'sprint';
+        if (mode === 'run') return 'run';
+        if (mode === 'jog') return 'jog';
+        if (mode === 'walk') return 'walk';
+
+        // Fallback op description
+        if (desc.includes('warm') || desc.includes('cool') || desc.includes('cooldown')) return 'warmup';
+        if (desc.includes('sprint') || desc.includes('interval') || desc.includes('hit')) return 'sprint';
+        if (desc.includes('run') || desc.includes('long') || desc.includes('ren')) return 'run';
+        if (desc.includes('jog') || desc.includes('easy') || desc.includes('herstel') || desc.includes('recovery')) return 'jog';
+        if (desc.includes('walk') || desc.includes('loop') || desc.includes('lopen')) return 'walk';
+        return 'jog'; // default
+    },
+
+    // Vertaalt mode naar een Nederlands display label
+    _getDisplayLabel: function(mode, description) {
+        var simpleMode = this._getSimpleMode(mode, description);
+        var labelMap = {
+            'warmup': 'warmingup',
+            'sprint': 'sprinten',
+            'run': 'rennen',
+            'jog': 'joggen',
+            'walk': 'lopen'
+        };
+        return labelMap[simpleMode] || 'joggen';
+    },
+
+    // Vertaalt alle blokken in een sessie: mode blijft korte code, s wordt Nederlands label
+    _translateSessionBlocks: function(blocks) {
+        return blocks.map(function(b) {
+            return {
+                m: this._getSimpleMode(b.m, b.s),
+                s: this._getDisplayLabel(b.m, b.s),
+                t: b.t
+            };
+        }.bind(this));
     },
 
     formatT: function(s) { return Math.floor(s / 60) + ':' + (s % 60).toString().padStart(2, '0'); },
@@ -894,9 +1143,15 @@ const APP = {
         if (STATE.countdownInterval) return;
         this.requestWakeLock();
         document.getElementById('preview-overlay').style.display = 'none';
+        // Pop the preview state since we're transitioning to timer
+        HistoryManager.close();
         
         document.querySelectorAll('.tab-view').forEach(t => t.classList.remove('active'));
         document.getElementById('timer-display').classList.add('active');
+        // Push timer state
+        HistoryManager.open('timer', 'Training Active', function() {
+            APP.finishTraining();
+        });
 
         STATE.totalDist = 0; STATE.currentRoute = []; STATE.paceData = [];
         STATE.lastKMSpeech = 0; STATE.lastPaceTime = Date.now(); STATE.startTime = Date.now();
@@ -1029,20 +1284,34 @@ const APP = {
         this.releaseWakeLock(); clearInterval(STATE.timerId); navigator.geolocation.clearWatch(STATE.watchId);
         
         document.getElementById('timer-display').classList.remove('active');
+        // Pop the timer state since we're transitioning to result
+        HistoryManager.close();
+        
         document.getElementById('tab-home').classList.add('active');
 
         var ts = STATE.activeSeconds; var dm = ts / 60;
-        var pace = STATE.totalDist > 0.1 ? (dm / STATE.totalDist).toFixed(2) : '0.00';
+        var paceNum = STATE.totalDist > 0.1 ? dm / STATE.totalDist : 0;
+        var pace = paceNum > 0 ? paceNum.toFixed(2) : '0.00';
         var cal = this.calculateCalories(STATE.totalDist, dm);
 
         document.getElementById('res-d').innerText = STATE.totalDist.toFixed(2);
-        document.getElementById('res-p').innerText = pace;
+
+        // Format pace as mm:ss
+        if (paceNum > 0) {
+            var paceMin = Math.floor(paceNum);
+            var paceSec = Math.round((paceNum - paceMin) * 60);
+            document.getElementById('res-p').innerText = paceMin + ':' + paceSec.toString().padStart(2, '0');
+        } else {
+            document.getElementById('res-p').innerText = '0:00';
+        }
+
         document.getElementById('res-time').innerText = this.formatT(ts);
         document.getElementById('res-cal').innerText = cal;
 
-        var speechText = 'Sessie voltooid! ';
-        if (STATE.totalDist > 0.1) speechText += STATE.totalDist.toFixed(2) + ' kilometer gerend in ' + this.formatT(ts) + '. ';
-        this.speak(speechText);
+        // Save to IndexedDB
+        var now = new Date();
+        var nowStr = now.toLocaleDateString('nl-NL');
+        var timeStr = now.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
 
         var ss = 0, rs = 0, js = 0, ws = 0;
         if (STATE.paceData && STATE.paceData.length > 0) {
@@ -1071,6 +1340,27 @@ const APP = {
         UI.renderResultMap(STATE.currentRoute);
         UI.renderPaceChart(STATE.paceData);
         UI.openResultScreen();
+
+        // Automatically save the run to IndexedDB
+        var runData = {
+            d: nowStr,
+            t: timeStr,
+            n: 'Training',
+            dist: STATE.totalDist.toFixed(2),
+            duration: ts,
+            pace: paceNum > 0 ? paceNum.toFixed(2) : '0.00',
+            calories: cal,
+            sprintTime: Math.round(ss),
+            runTime: Math.round(rs),
+            jogTime: Math.round(js),
+            walkTime: Math.round(ws),
+            route: STATE.currentRoute,
+            paceData: STATE.paceData
+        };
+
+        DB.add(runData, function() {
+            console.log('Sessie opgeslagen');
+        });
     },
 
     startBaselineTest: function() {
@@ -1080,13 +1370,16 @@ const APP = {
             weeks: [{ w: 1, t1: { label: '📊 Baseline Test (30 min)', b: [{ m: 'warmup', s: 'Warming-up', t: 300 }, { m: 'run', s: 'Loop rustig in eigen tempo', t: 1800 }, { m: 'warmup', s: 'Cool-down', t: 300 }] } }]
         };
         var training = STATE.schemas[planKey].weeks[0].t1;
-        STATE.sessionBlocks = APP.applyCustomTimings(training.b);
+        STATE.sessionBlocks = APP._translateSessionBlocks(APP.applyCustomTimings(training.b));
         document.getElementById('pre-title').innerText = training.label;
         document.getElementById('pre-time').innerText = Math.round(STATE.sessionBlocks.reduce(function(a, b) { return a + b.t; }, 0) / 60) + ' min';
         document.getElementById('pre-type').innerText = 'Baseline Test';
         var maxT = Math.max.apply(null, STATE.sessionBlocks.map(function(b) { return b.t; }));
         document.getElementById('pre-chart').innerHTML = STATE.sessionBlocks.map(function(b) { return '<div class="bar ' + b.m + '" style="height:' + Math.max(15, (b.t / maxT) * 100) + '%"><span>' + Math.round(b.t / 60) + 'm</span></div>'; }).join('');
         document.getElementById('preview-overlay').style.display = 'flex';
+        HistoryManager.open('preview', 'Baseline Test Preview', function() {
+            document.getElementById('preview-overlay').style.display = 'none';
+        });
     },
 
     generateCustomPlan: function() {
@@ -1126,9 +1419,19 @@ const APP = {
         var wd = DB.processWeeklyData(runs);
         var currentWeek = wd.length > 0 ? wd[0] : null;
         if (currentWeek) {
-            document.getElementById('week-progress-current').innerText = currentWeek.totalDist.toFixed(1) + ' KM gelopen';
+            // Calculate a simple weekly goal: previous week's distance, or base volume as fallback
+            var prevWeek = wd.length > 1 ? wd[1] : null;
+            var goalKm = prevWeek ? Math.round(prevWeek.totalDist * 1.1 * 10) / 10 : 10;
+            var currentKm = currentWeek.totalDist;
+            var pct = goalKm > 0 ? Math.min(100, Math.round((currentKm / goalKm) * 100)) : 0;
+
+            document.getElementById('week-progress-current').innerText = currentKm.toFixed(1) + ' KM gelopen';
+            document.getElementById('week-progress-target').innerText = 'Doel: ' + goalKm.toFixed(1) + ' km';
+            document.getElementById('week-progress-fill').style.width = pct + '%';
+        } else {
+            document.getElementById('week-progress-current').innerText = '0.0 KM gelopen';
             document.getElementById('week-progress-target').innerText = 'Doel: - km';
-            document.getElementById('week-progress-fill').style.width = '5%';
+            document.getElementById('week-progress-fill').style.width = '0%';
         }
     },
 
@@ -1270,7 +1573,14 @@ const APP = {
             if (!data) return;
             STATE.viewedRoute = data.route || [];
             document.getElementById('res-d').innerText = data.dist;
-            document.getElementById('res-p').innerText = data.pace || '0.00';
+            var paceNum = parseFloat(data.pace) || 0;
+            if (paceNum > 0) {
+                var paceMin = Math.floor(paceNum);
+                var paceSec = Math.round((paceNum - paceMin) * 60);
+                document.getElementById('res-p').innerText = paceMin + ':' + paceSec.toString().padStart(2, '0');
+            } else {
+                document.getElementById('res-p').innerText = '0:00';
+            }
             document.getElementById('res-time').innerText = APP.formatT(data.duration || 0);
             document.getElementById('res-cal').innerText = data.calories || 0;
             var ss = parseFloat(data.sprintTime) || 0;
