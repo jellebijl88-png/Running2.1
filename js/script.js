@@ -382,12 +382,25 @@ const UI = {
 
     openResultScreen: function() {
         document.getElementById('result-screen').classList.add('active');
+        // Update the button based on whether this is a history run or freshly finished session
+        var btn = document.getElementById('res-btn');
+        if (STATE._viewingHistoryRun) {
+            btn.innerText = 'SLUITEN';
+            btn.onclick = function() { UI.closeResultScreen(false); };
+        } else {
+            btn.innerText = 'OPSLAAN IN LOGBOEK';
+            btn.onclick = function() { UI.closeResultScreen(true); };
+        }
         HistoryManager.open('result', 'Result', function() {
             document.getElementById('result-screen').classList.remove('active');
         });
     },
     closeResultScreen: function(reload) {
         document.getElementById('result-screen').classList.remove('active');
+        // Reset the history-run flag when closing
+        if (STATE._viewingHistoryRun) {
+            STATE._viewingHistoryRun = false;
+        }
         HistoryManager.close();
         if (reload) setTimeout(() => location.reload(), 400);
     },
@@ -809,7 +822,8 @@ const STATE = {
     viewedRoute: null, paceData: [], lastKMSpeech: 0, lastPaceTime: 0, startTime: null, activeSeconds: 0,
     isPaused: false, lastGpsTime: 0, speedEMA: 0, timerId: null, watchId: null, wakeLock: null,
     synth: window.speechSynthesis, voices: [], heartRateDevice: null, heartRateCharacteristic: null,
-    currentHeartRate: 0, countdownInterval: null, schemas: {}
+    currentHeartRate: 0, countdownInterval: null, schemas: {},
+    _viewingHistoryRun: false
 };
 
 // ==============================================
@@ -1569,6 +1583,7 @@ const APP = {
     // Run History
     // ==============================================
     viewRun: function(id) {
+        STATE._viewingHistoryRun = true;
         DB.get(id, function(data) {
             if (!data) return;
             STATE.viewedRoute = data.route || [];
